@@ -1,10 +1,13 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function HomeScreen() {
+  const router = useRouter();
+
   return (
     <View style={styles.container}>
       <View style={styles.heroCard}>
-        <Text style={styles.badge}>MVP BUILD • DAY 1</Text>
+        <Text style={styles.badge}>MVP BUILD • DAY 2</Text>
         <Text style={styles.title}>Walk. Talk. Export PDF.</Text>
         <Text style={styles.subtitle}>
           Point your camera at a defect and speak naturally. AI handles the formatting.
@@ -12,7 +15,7 @@ export default function HomeScreen() {
 
         <TouchableOpacity 
           style={styles.primaryButton}
-          onPress={() => alert('Camera & Audio Capture coming in Day 2!')}
+          onPress={() => router.push('/walkthrough')}
         >
           <Text style={styles.primaryButtonText}>+ Start New Inspection Walk</Text>
         </TouchableOpacity>

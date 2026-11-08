@@ -16,6 +16,13 @@ export default function RootLayout() {
           name="index" 
           options={{ title: 'WalkPunch AI' }} 
         />
+        <Stack.Screen 
+          name="walkthrough" 
+          options={{ 
+            title: 'Active Walkthrough',
+            headerShown: false 
+          }} 
+        />
       </Stack>
     </>
   );
