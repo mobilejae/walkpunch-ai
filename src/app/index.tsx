@@ -1,23 +1,69 @@
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useInspectionStore } from '../store/inspectionStore';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { propertyName, inspectorName, defects, isHydrated, clearAll } = useInspectionStore();
+  const {
+    propertyName,
+    inspectorName,
+    defects,
+    savedProjects,
+    isHydrated,
+    archiveAndStartNew,
+    loadArchivedProject,
+    deleteArchivedProject,
+    clearAll,
+  } = useInspectionStore();
+
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [newAddressInput, setNewAddressInput] = useState('');
 
   const criticalCount = defects.filter((d) => d.aiData?.severity === 'Critical').length;
   const highCount = defects.filter((d) => d.aiData?.severity === 'High').length;
   const mediumCount = defects.filter((d) => d.aiData?.severity === 'Medium').length;
   const lowCount = defects.filter((d) => d.aiData?.severity === 'Low').length;
 
-  function confirmStartFresh() {
+  function handleStartNewProperty() {
+    const address = newAddressInput.trim() || 'New Property Inspection';
+    archiveAndStartNew(address);
+    setNewAddressInput('');
+    setShowNewModal(false);
+  }
+
+  function confirmDeleteArchive(id: string, name: string) {
     Alert.alert(
-      'Start Fresh Inspection?',
-      'This will clear all currently logged punch items from device storage.',
+      'Delete Saved Inspection?',
+      `Permanently remove "${name}" from your device archive?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear & Reset', style: 'destructive', onPress: () => clearAll() },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteArchivedProject(id),
+        },
+      ]
+    );
+  }
+
+  function confirmDiscardCurrent() {
+    Alert.alert(
+      'Discard Current Items?',
+      'This will clear the current active inspection without archiving it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => clearAll() },
       ]
     );
   }
@@ -26,84 +72,190 @@ export default function HomeScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#38BDF8" />
-        <Text style={styles.loadingText}>Loading saved inspection...</Text>
+        <Text style={styles.loadingText}>Loading inspection workspace...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>ON-DEVICE AUTO-SAVE ACTIVE</Text>
-      </View>
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>MULTI-PROJECT ARCHIVE ACTIVE</Text>
+        </View>
 
-      <Text style={styles.title}>WalkPunch AI</Text>
-      <Text style={styles.subtitle}>
-        Snap photos and speak naturally during your walkthrough. Every punch item is automatically saved to device storage.
-      </Text>
-
-      <View style={styles.statusCard}>
-        <Text style={styles.statusLabel}>ACTIVE INSPECTION</Text>
-        <Text style={styles.propertyTitle}>{propertyName}</Text>
-        <Text style={styles.inspectorText}>Inspector: {inspectorName}</Text>
-        <Text style={styles.countText}>
-          {defects.length} {defects.length === 1 ? 'Defect' : 'Defects'} Saved on Device
+        <Text style={styles.title}>WalkPunch AI</Text>
+        <Text style={styles.subtitle}>
+          Capture photos and voice notes on site. Switch between properties or export client-ready PDF reports anytime.
         </Text>
+
+        <View style={styles.statusCard}>
+          <View style={styles.statusHeaderRow}>
+            <Text style={styles.statusLabel}>ACTIVE INSPECTION</Text>
+            <TouchableOpacity
+              style={styles.newPropertyChip}
+              onPress={() => setShowNewModal(true)}
+            >
+              <Text style={styles.newPropertyChipText}>+ New Property</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.propertyTitle}>{propertyName}</Text>
+          <Text style={styles.inspectorText}>Inspector: {inspectorName}</Text>
+          <Text style={styles.countText}>
+            {defects.length} {defects.length === 1 ? 'Defect' : 'Defects'} Logged
+          </Text>
+
+          {defects.length > 0 && (
+            <View style={styles.pillsRow}>
+              <View style={[styles.sevPill, { borderColor: '#EF4444' }]}>
+                <Text style={[styles.sevPillText, { color: '#EF4444' }]}>
+                  Crit: {criticalCount}
+                </Text>
+              </View>
+              <View style={[styles.sevPill, { borderColor: '#F97316' }]}>
+                <Text style={[styles.sevPillText, { color: '#F97316' }]}>
+                  High: {highCount}
+                </Text>
+              </View>
+              <View style={[styles.sevPill, { borderColor: '#EAB308' }]}>
+                <Text style={[styles.sevPillText, { color: '#EAB308' }]}>
+                  Med: {mediumCount}
+                </Text>
+              </View>
+              <View style={[styles.sevPill, { borderColor: '#22C55E' }]}>
+                <Text style={[styles.sevPillText, { color: '#22C55E' }]}>
+                  Low: {lowCount}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => router.push('/walkthrough')}
+        >
+          <Text style={styles.primaryButtonText}>
+            {defects.length > 0 ? '📷 Resume Camera Walk' : '📷 Start Camera Walk'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.push('/review')}
+        >
+          <Text style={styles.secondaryButtonText}>
+            📋 Review, Edit & Export PDF ({defects.length})
+          </Text>
+        </TouchableOpacity>
 
         {defects.length > 0 && (
-          <View style={styles.pillsRow}>
-            <View style={[styles.sevPill, { borderColor: '#EF4444' }]}>
-              <Text style={[styles.sevPillText, { color: '#EF4444' }]}>
-                Crit: {criticalCount}
-              </Text>
-            </View>
-            <View style={[styles.sevPill, { borderColor: '#F97316' }]}>
-              <Text style={[styles.sevPillText, { color: '#F97316' }]}>
-                High: {highCount}
-              </Text>
-            </View>
-            <View style={[styles.sevPill, { borderColor: '#EAB308' }]}>
-              <Text style={[styles.sevPillText, { color: '#EAB308' }]}>
-                Med: {mediumCount}
-              </Text>
-            </View>
-            <View style={[styles.sevPill, { borderColor: '#22C55E' }]}>
-              <Text style={[styles.sevPillText, { color: '#22C55E' }]}>
-                Low: {lowCount}
-              </Text>
-            </View>
+          <TouchableOpacity
+            style={styles.discardButton}
+            onPress={confirmDiscardCurrent}
+          >
+            <Text style={styles.discardButtonText}>
+              🗑 Discard Current Walk Without Saving
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {savedProjects.length > 0 && (
+          <View style={styles.archiveSection}>
+            <Text style={styles.archiveSectionTitle}>
+              SAVED INSPECTIONS ARCHIVE ({savedProjects.length})
+            </Text>
+
+            {savedProjects.map((project) => (
+              <View key={project.id} style={styles.archiveCard}>
+                <View style={styles.archiveInfo}>
+                  <Text style={styles.archivePropertyTitle}>
+                    {project.propertyName}
+                  </Text>
+                  <Text style={styles.archiveMetaText}>
+                    {project.defects.length}{' '}
+                    {project.defects.length === 1 ? 'Defect' : 'Defects'} • Saved{' '}
+                    {project.updatedAt}
+                  </Text>
+                </View>
+
+                <View style={styles.archiveActions}>
+                  <TouchableOpacity
+                    style={styles.openArchiveBtn}
+                    onPress={() => loadArchivedProject(project.id)}
+                  >
+                    <Text style={styles.openArchiveBtnText}>Open</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.deleteArchiveBtn}
+                    onPress={() =>
+                      confirmDeleteArchive(project.id, project.propertyName)
+                    }
+                  >
+                    <Text style={styles.deleteArchiveBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
         )}
-      </View>
+      </ScrollView>
 
-      <TouchableOpacity
-        style={styles.primaryButton}
-        onPress={() => router.push('/walkthrough')}
+      <Modal
+        visible={showNewModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNewModal(false)}
       >
-        <Text style={styles.primaryButtonText}>
-          {defects.length > 0 ? '📷 Resume Inspection Walk' : '+ Start Inspection Walk'}
-        </Text>
-      </TouchableOpacity>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Start New Property Walk</Text>
+            <Text style={styles.modalSubtitle}>
+              {defects.length > 0
+                ? `"${propertyName}" (${defects.length} items) will be automatically archived so you can reopen it anytime.`
+                : 'Enter the property address or unit name for this inspection.'}
+            </Text>
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => router.push('/review')}
-      >
-        <Text style={styles.secondaryButtonText}>
-          📋 Review & Edit Punch List ({defects.length})
-        </Text>
-      </TouchableOpacity>
+            <TextInput
+              style={styles.modalInput}
+              value={newAddressInput}
+              onChangeText={setNewAddressInput}
+              placeholder="e.g., 2450 Oak Creek Dr"
+              placeholderTextColor="#64748B"
+              autoFocus
+            />
 
-      {defects.length > 0 && (
-        <TouchableOpacity style={styles.resetButton} onPress={confirmStartFresh}>
-          <Text style={styles.resetButtonText}>🗑 Clear & Start Fresh Inspection</Text>
-        </TouchableOpacity>
-      )}
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowNewModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                onPress={handleStartNewProperty}
+              >
+                <Text style={styles.modalConfirmText}>
+                  {defects.length > 0 ? 'Archive & Start' : 'Start Walk'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
   loadingContainer: {
     flex: 1,
     backgroundColor: '#0F172A',
@@ -116,10 +268,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
     padding: 24,
+    paddingTop: 64,
+    paddingBottom: 48,
   },
   badge: {
     alignSelf: 'flex-start',
@@ -129,7 +280,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   badgeText: {
     color: '#38BDF8',
@@ -141,13 +292,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 34,
     fontWeight: '900',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   subtitle: {
     color: '#94A3B8',
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 24,
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 22,
   },
   statusCard: {
     backgroundColor: '#1E293B',
@@ -155,17 +306,33 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#334155',
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  statusHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   statusLabel: {
     color: '#38BDF8',
     fontSize: 11,
     fontWeight: '800',
-    marginBottom: 4,
+  },
+  newPropertyChip: {
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  newPropertyChipText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
   propertyTitle: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     marginBottom: 2,
   },
@@ -200,7 +367,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: '#2563EB',
-    paddingVertical: 18,
+    paddingVertical: 17,
     borderRadius: 14,
     alignItems: 'center',
     marginBottom: 12,
@@ -217,20 +384,150 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#334155',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   secondaryButtonText: {
     color: '#E2E8F0',
     fontSize: 15,
     fontWeight: '700',
   },
-  resetButton: {
-    paddingVertical: 12,
+  discardButton: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  discardButtonText: {
+    color: '#F87171',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  archiveSection: {
+    marginTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    paddingTop: 18,
+  },
+  archiveSectionTitle: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  archiveCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  resetButtonText: {
+  archiveInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  archivePropertyTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  archiveMetaText: {
+    color: '#94A3B8',
+    fontSize: 12,
+  },
+  archiveActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  openArchiveBtn: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  openArchiveBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  deleteArchiveBtn: {
+    backgroundColor: '#334155',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  deleteArchiveBtnText: {
     color: '#F87171',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: '#000000B3',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+  },
+  modalTitle: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    color: '#94A3B8',
     fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: '#0F172A',
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '700',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 16,
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#334155',
+  },
+  modalCancelText: {
+    color: '#CBD5E1',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  modalConfirmBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+  },
+  modalConfirmText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
   },
 });
