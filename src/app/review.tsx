@@ -2,6 +2,7 @@ import { useAudioPlayer } from 'expo-audio';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   ScrollView,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
+import { savePdfToDevice, sharePdfReport } from '../services/pdfGenerator';
 import { CapturedDefect, useInspectionStore } from '../store/inspectionStore';
 
 const SEVERITIES: Array<ParsedPunchItem['severity']> = ['Low', 'Medium', 'High', 'Critical'];
@@ -39,6 +41,7 @@ export default function ReviewScreen() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<'All' | ParsedPunchItem['severity']>('All');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const filteredDefects =
     selectedFilter === 'All'
@@ -52,6 +55,42 @@ export default function ReviewScreen() {
       audioPlayer.play();
     } catch (error) {
       Alert.alert('Playback Error', 'Could not play voice recording.');
+    }
+  }
+
+  async function handleSavePdf() {
+    if (defects.length === 0) {
+      Alert.alert('No Punch Items', 'Log at least one defect before saving a PDF report.');
+      return;
+    }
+    try {
+      setIsExportingPdf(true);
+      const savedFileName = await savePdfToDevice(propertyName, inspectorName, defects);
+      if (savedFileName) {
+        Alert.alert(
+          'PDF Saved to Phone',
+          `${savedFileName} was saved to your selected device folder.`
+        );
+      }
+    } catch (error: any) {
+      Alert.alert('PDF Save Error', error?.message || 'Could not save PDF to device.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
+
+  async function handleSharePdf() {
+    if (defects.length === 0) {
+      Alert.alert('No Punch Items', 'Log at least one defect before sharing a PDF report.');
+      return;
+    }
+    try {
+      setIsExportingPdf(true);
+      await sharePdfReport(propertyName, inspectorName, defects);
+    } catch (error: any) {
+      Alert.alert('PDF Share Error', error?.message || 'Could not share PDF file.');
+    } finally {
+      setIsExportingPdf(false);
     }
   }
 
@@ -127,6 +166,30 @@ export default function ReviewScreen() {
           <Text style={styles.summaryText}>
             Showing {filteredDefects.length} of {defects.length} Saved Defects
           </Text>
+
+          {defects.length > 0 && (
+            <View style={styles.pdfActionsRow}>
+              <TouchableOpacity
+                style={[styles.pdfSaveBtn, isExportingPdf && styles.disabledBtn]}
+                onPress={handleSavePdf}
+                disabled={isExportingPdf}
+              >
+                {isExportingPdf ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.pdfBtnText}>💾 Save PDF to Phone</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.pdfShareBtn, isExportingPdf && styles.disabledBtn]}
+                onPress={handleSharePdf}
+                disabled={isExportingPdf}
+              >
+                <Text style={styles.pdfBtnText}>📤 Share PDF</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {defects.length > 0 && (
@@ -363,7 +426,28 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
     marginBottom: 10,
   },
-  summaryText: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
+  summaryText: { color: '#94A3B8', fontSize: 13, fontWeight: '600', marginBottom: 12 },
+  pdfActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  pdfSaveBtn: {
+    flex: 1,
+    backgroundColor: '#16A34A',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  pdfShareBtn: {
+    flex: 1,
+    backgroundColor: '#2563EB',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  disabledBtn: { opacity: 0.6 },
+  pdfBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   filterBar: { marginBottom: 14 },
   filterChip: {
     backgroundColor: '#1E293B',
