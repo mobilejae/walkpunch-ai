@@ -1,30 +1,47 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useInspectionStore } from '../store/inspectionStore';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { propertyName, defects } = useInspectionStore();
 
   return (
     <View style={styles.container}>
-      <View style={styles.heroCard}>
-        <Text style={styles.badge}>MVP BUILD • DAY 2</Text>
-        <Text style={styles.title}>Walk. Talk. Export PDF.</Text>
-        <Text style={styles.subtitle}>
-          Point your camera at a defect and speak naturally. AI handles the formatting.
+      <View style={styles.badge}>
+        <Text style={styles.badgeText}>GEMINI 3.8 MULTIMODAL READY</Text>
+      </View>
+
+      <Text style={styles.title}>WalkPunch AI</Text>
+      <Text style={styles.subtitle}>
+        Snap photos and speak naturally during your walkthrough. AI parses every defect into structured punch items automatically.
+      </Text>
+
+      <View style={styles.statusCard}>
+        <Text style={styles.statusLabel}>ACTIVE INSPECTION</Text>
+        <Text style={styles.propertyTitle}>{propertyName}</Text>
+        <Text style={styles.countText}>
+          {defects.length} {defects.length === 1 ? 'Defect' : 'Defects'} Logged in Session
         </Text>
-
-        <TouchableOpacity 
-          style={styles.primaryButton}
-          onPress={() => router.push('/walkthrough')}
-        >
-          <Text style={styles.primaryButtonText}>+ Start New Inspection Walk</Text>
-        </TouchableOpacity>
       </View>
 
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyTitle}>Recent Inspection Reports</Text>
-        <Text style={styles.emptyText}>No walkthroughs recorded yet.</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={() => router.push('/walkthrough')}
+      >
+        <Text style={styles.primaryButtonText}>
+          {defects.length > 0 ? '📷 Resume Inspection Walk' : '+ Start New Inspection Walk'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.secondaryButton}
+        onPress={() => router.push('/review')}
+      >
+        <Text style={styles.secondaryButtonText}>
+          📋 Review & Edit Punch List ({defects.length})
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -32,61 +49,86 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
-    padding: 20,
-  },
-  heroCard: {
     backgroundColor: '#0F172A',
-    borderRadius: 16,
+    justifyContent: 'center',
     padding: 24,
-    marginBottom: 24,
   },
   badge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E293B',
+    borderColor: '#38BDF8',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  badgeText: {
     color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 8,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
   title: {
     color: '#FFFFFF',
-    fontSize: 26,
-    fontWeight: '800',
-    marginBottom: 8,
+    fontSize: 34,
+    fontWeight: '900',
+    marginBottom: 10,
   },
   subtitle: {
     color: '#94A3B8',
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 28,
+  },
+  statusCard: {
+    backgroundColor: '#1E293B',
+    padding: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
     marginBottom: 24,
+  },
+  statusLabel: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  propertyTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  countText: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
   },
   primaryButton: {
     backgroundColor: '#2563EB',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: 'center',
+    marginBottom: 12,
   },
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  emptyState: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
+  secondaryButton: {
+    backgroundColor: '#1E293B',
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#334155',
   },
-  emptyTitle: {
-    color: '#1E293B',
-    fontSize: 18,
+  secondaryButtonText: {
+    color: '#E2E8F0',
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 6,
-  },
-  emptyText: {
-    color: '#64748B',
-    fontSize: 14,
   },
 });

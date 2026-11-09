@@ -3,33 +3,22 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
-
-interface CapturedDefect {
-  id: string;
-  photoUri: string;
-  audioUri: string | null;
-  timestamp: string;
-  status: 'analyzing' | 'ready' | 'error';
-  aiData?: ParsedPunchItem;
-  errorMessage?: string;
-  expanded?: boolean;
-}
+import { analyzeDefectWithAI } from '../services/gemini';
+import { CapturedDefect, useInspectionStore } from '../store/inspectionStore';
 
 export default function WalkthroughScreen() {
   const router = useRouter();
   const cameraRef = useRef<CameraView>(null);
 
+  const { defects, addDefect, updateDefect } = useInspectionStore();
+
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micGranted, setMicGranted] = useState<boolean | null>(null);
 
-  // Switched to LOW_QUALITY preset for instant 2-second audio uploads
   const audioRecorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
   const audioPlayer = useAudioPlayer(null);
   const [isRecording, setIsRecording] = useState(false);
-
   const [currentPhotoUri, setCurrentPhotoUri] = useState<string | null>(null);
-  const [defects, setDefects] = useState<CapturedDefect[]>([]);
 
   useEffect(() => {
     async function checkMicPermission() {
@@ -97,11 +86,12 @@ export default function WalkthroughScreen() {
     if (!isRecording || !currentPhotoUri) return;
     setIsRecording(false);
 
+    const itemId = Date.now().toString();
+
     try {
       await audioRecorder.stop();
       const audioUri = audioRecorder.uri;
       const capturedPhoto = currentPhotoUri;
-      const itemId = Date.now().toString();
 
       const initialItem: CapturedDefect = {
         id: itemId,
@@ -112,7 +102,7 @@ export default function WalkthroughScreen() {
         expanded: false,
       };
 
-      setDefects((prev) => [initialItem, ...prev]);
+      addDefect(initialItem);
       setCurrentPhotoUri(null);
 
       if (!audioUri) {
@@ -121,28 +111,16 @@ export default function WalkthroughScreen() {
 
       const aiResult = await analyzeDefectWithAI(capturedPhoto, audioUri);
 
-      setDefects((prev) =>
-        prev.map((item) =>
-          item.id === itemId ? { ...item, status: 'ready', aiData: aiResult } : item
-        )
-      );
+      updateDefect(itemId, { status: 'ready', aiData: aiResult });
     } catch (error: any) {
       const msg = error?.message || 'AI parsing failed';
-      setDefects((prev) =>
-        prev.map((item, idx) =>
-          idx === 0 && item.status === 'analyzing'
-            ? { ...item, status: 'error', errorMessage: msg }
-            : item
-        )
-      );
+      updateDefect(itemId, { status: 'error', errorMessage: msg });
       Alert.alert('AI Analysis Issue', msg);
     }
   }
 
-  function toggleExpandCard(id: string) {
-    setDefects((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, expanded: !item.expanded } : item))
-    );
+  function toggleExpandCard(id: string, currentExpanded?: boolean) {
+    updateDefect(id, { expanded: !currentExpanded });
   }
 
   function playVoiceNote(audioUri: string | null) {
@@ -175,14 +153,17 @@ export default function WalkthroughScreen() {
       <View style={styles.overlayContainer} pointerEvents="box-none">
         <View style={styles.topHud}>
           <TouchableOpacity style={styles.exitButton} onPress={() => router.back()}>
-            <Text style={styles.exitButtonText}>✕ End Walk</Text>
+            <Text style={styles.exitButtonText}>← Home</Text>
           </TouchableOpacity>
 
-          <View style={styles.statusBadge}>
+          <TouchableOpacity
+            style={styles.statusBadge}
+            onPress={() => router.push('/review')}
+          >
             <Text style={styles.statusBadgeText}>
-              {isRecording ? '🔴 RECORDING VOICE...' : `📋 ${defects.length} PUNCH ITEMS`}
+              {isRecording ? '🔴 RECORDING...' : `📋 ${defects.length} ITEMS • REVIEW →`}
             </Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {currentPhotoUri && (
@@ -209,7 +190,7 @@ export default function WalkthroughScreen() {
                 <TouchableOpacity
                   key={item.id}
                   style={[styles.punchCard, item.expanded && styles.punchCardExpanded]}
-                  onPress={() => toggleExpandCard(item.id)}
+                  onPress={() => toggleExpandCard(item.id, item.expanded)}
                   activeOpacity={0.9}
                 >
                   <View style={styles.cardHeaderTop}>
@@ -257,12 +238,12 @@ export default function WalkthroughScreen() {
                       <Text style={styles.actionText} numberOfLines={item.expanded ? undefined : 1}>
                         🛠 {item.aiData.recommendedAction}
                       </Text>
-                      
+
                       <View style={styles.cardFooterRow}>
                         <Text style={styles.expandHint}>
                           {item.expanded ? '▲ Tap to collapse' : '▼ Tap to expand'}
                         </Text>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           style={styles.playAudioButton}
                           onPress={() => playVoiceNote(item.audioUri)}
                         >
@@ -317,7 +298,7 @@ const styles = StyleSheet.create({
   topHud: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 52, paddingHorizontal: 20 },
   exitButton: { backgroundColor: '#0F172ACC', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
   exitButtonText: { color: '#F8FAFC', fontWeight: '700', fontSize: 13 },
-  statusBadge: { backgroundColor: '#0F172AD9', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
+  statusBadge: { backgroundColor: '#1E293BE6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: '#38BDF8' },
   statusBadgeText: { color: '#38BDF8', fontWeight: '800', fontSize: 12 },
   stagedBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0F172AE6', marginHorizontal: 20, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: '#38BDF8' },
   stagedThumb: { width: 54, height: 54, borderRadius: 8, marginRight: 12 },
