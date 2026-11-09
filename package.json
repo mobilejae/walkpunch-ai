@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~58.0.27",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.23",
     "expo-audio": "~58.0.11",
     "expo-camera": "~58.0.14",

@@ -15,13 +15,22 @@ import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
 import { CapturedDefect, useInspectionStore } from '../store/inspectionStore';
 
 const SEVERITIES: Array<ParsedPunchItem['severity']> = ['Low', 'Medium', 'High', 'Critical'];
+const FILTER_OPTIONS: Array<'All' | ParsedPunchItem['severity']> = [
+  'All',
+  'Critical',
+  'High',
+  'Medium',
+  'Low',
+];
 
 export default function ReviewScreen() {
   const router = useRouter();
   const audioPlayer = useAudioPlayer(null);
   const {
     propertyName,
+    inspectorName,
     setPropertyName,
+    setInspectorName,
     defects,
     updateDefect,
     updateDefectAiData,
@@ -29,6 +38,12 @@ export default function ReviewScreen() {
   } = useInspectionStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<'All' | ParsedPunchItem['severity']>('All');
+
+  const filteredDefects =
+    selectedFilter === 'All'
+      ? defects
+      : defects.filter((item) => item.aiData?.severity === selectedFilter);
 
   function playVoiceNote(audioUri: string | null) {
     if (!audioUri) return;
@@ -99,26 +114,72 @@ export default function ReviewScreen() {
             placeholder="Enter property or unit name..."
             placeholderTextColor="#64748B"
           />
+
+          <Text style={styles.label}>INSPECTOR / PREPARED BY</Text>
+          <TextInput
+            style={styles.propertyInput}
+            value={inspectorName}
+            onChangeText={setInspectorName}
+            placeholder="Enter inspector name..."
+            placeholderTextColor="#64748B"
+          />
+
           <Text style={styles.summaryText}>
-            Total Logged Defects: {defects.length}
+            Showing {filteredDefects.length} of {defects.length} Saved Defects
           </Text>
         </View>
 
-        {defects.length === 0 ? (
+        {defects.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterBar}
+          >
+            {FILTER_OPTIONS.map((filter) => {
+              const active = selectedFilter === filter;
+              return (
+                <TouchableOpacity
+                  key={filter}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setSelectedFilter(filter)}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      active && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {filter}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {filteredDefects.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>No Punch Items Logged Yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Return to the camera walkthrough to capture photos and voice notes.
+            <Text style={styles.emptyTitle}>
+              {defects.length === 0
+                ? 'No Punch Items Logged Yet'
+                : `No ${selectedFilter} Severity Items`}
             </Text>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => router.push('/walkthrough')}
-            >
-              <Text style={styles.primaryBtnText}>+ Capture First Defect</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptySubtitle}>
+              {defects.length === 0
+                ? 'Return to the camera walkthrough to capture photos and voice notes.'
+                : 'Switch the filter above to view all logged defects.'}
+            </Text>
+            {defects.length === 0 && (
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => router.push('/walkthrough')}
+              >
+                <Text style={styles.primaryBtnText}>+ Capture First Defect</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
-          defects.map((item, index) => {
+          filteredDefects.map((item, index) => {
             const isEditing = editingId === item.id;
             return (
               <View key={item.id} style={styles.defectCard}>
@@ -126,7 +187,7 @@ export default function ReviewScreen() {
                   <Image source={{ uri: item.photoUri }} style={styles.defectImage} />
                   <View style={styles.cardTopInfo}>
                     <View style={styles.badgeRow}>
-                      <Text style={styles.itemIndex}>#{defects.length - index}</Text>
+                      <Text style={styles.itemIndex}>#{filteredDefects.length - index}</Text>
                       <Text style={styles.timestampText}>{item.timestamp}</Text>
                       {item.aiData && (
                         <View
@@ -141,7 +202,7 @@ export default function ReviewScreen() {
                     </View>
 
                     {item.status === 'analyzing' && (
-                      <Text style={styles.analyzingText}>⏳ Queued / AI analyzing...</Text>
+                      <Text style={styles.analyzingText}>⏳ AI analyzing...</Text>
                     )}
 
                     {item.status === 'error' && (
@@ -285,7 +346,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     padding: 16,
     borderRadius: 14,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#334155',
   },
@@ -293,16 +354,32 @@ const styles = StyleSheet.create({
   propertyInput: {
     backgroundColor: '#0F172A',
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#334155',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   summaryText: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
+  filterBar: { marginBottom: 14 },
+  filterChip: {
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  filterChipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#38BDF8',
+  },
+  filterChipText: { color: '#94A3B8', fontSize: 12, fontWeight: '700' },
+  filterChipTextActive: { color: '#FFFFFF', fontWeight: '800' },
   emptyBox: { alignItems: 'center', padding: 36, backgroundColor: '#1E293B', borderRadius: 14 },
   emptyTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', marginBottom: 8 },
   emptySubtitle: { color: '#94A3B8', fontSize: 14, textAlign: 'center', marginBottom: 20 },
