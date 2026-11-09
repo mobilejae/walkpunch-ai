@@ -2,13 +2,18 @@ import { AudioModule, RecordingPresets, useAudioPlayer, useAudioRecorder } from 
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
 
 interface CapturedDefect {
   id: string;
   photoUri: string;
   audioUri: string | null;
   timestamp: string;
+  status: 'analyzing' | 'ready' | 'error';
+  aiData?: ParsedPunchItem;
+  errorMessage?: string;
+  expanded?: boolean;
 }
 
 export default function WalkthroughScreen() {
@@ -18,7 +23,8 @@ export default function WalkthroughScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micGranted, setMicGranted] = useState<boolean | null>(null);
 
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // Switched to LOW_QUALITY preset for instant 2-second audio uploads
+  const audioRecorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
   const audioPlayer = useAudioPlayer(null);
   const [isRecording, setIsRecording] = useState(false);
 
@@ -64,7 +70,7 @@ export default function WalkthroughScreen() {
   async function takePhoto() {
     if (!cameraRef.current) return;
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.4 });
       if (photo?.uri) {
         setCurrentPhotoUri(photo.uri);
       }
@@ -87,37 +93,78 @@ export default function WalkthroughScreen() {
     }
   }
 
-  async function stopRecordingAndSaveItem() {
+  async function stopRecordingAndAnalyze() {
     if (!isRecording || !currentPhotoUri) return;
     setIsRecording(false);
+
     try {
       await audioRecorder.stop();
       const audioUri = audioRecorder.uri;
+      const capturedPhoto = currentPhotoUri;
+      const itemId = Date.now().toString();
 
-      const newDefect: CapturedDefect = {
-        id: Date.now().toString(),
-        photoUri: currentPhotoUri,
+      const initialItem: CapturedDefect = {
+        id: itemId,
+        photoUri: capturedPhoto,
         audioUri: audioUri,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'analyzing',
+        expanded: false,
       };
 
-      setDefects((prev) => [newDefect, ...prev]);
+      setDefects((prev) => [initialItem, ...prev]);
       setCurrentPhotoUri(null);
-    } catch (error) {
-      Alert.alert('Save Error', 'Failed to save audio recording.');
+
+      if (!audioUri) {
+        throw new Error('Audio URI missing.');
+      }
+
+      const aiResult = await analyzeDefectWithAI(capturedPhoto, audioUri);
+
+      setDefects((prev) =>
+        prev.map((item) =>
+          item.id === itemId ? { ...item, status: 'ready', aiData: aiResult } : item
+        )
+      );
+    } catch (error: any) {
+      const msg = error?.message || 'AI parsing failed';
+      setDefects((prev) =>
+        prev.map((item, idx) =>
+          idx === 0 && item.status === 'analyzing'
+            ? { ...item, status: 'error', errorMessage: msg }
+            : item
+        )
+      );
+      Alert.alert('AI Analysis Issue', msg);
     }
   }
 
+  function toggleExpandCard(id: string) {
+    setDefects((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, expanded: !item.expanded } : item))
+    );
+  }
+
   function playVoiceNote(audioUri: string | null) {
-    if (!audioUri) {
-      Alert.alert('No Audio', 'No voice note found for this item.');
-      return;
-    }
+    if (!audioUri) return;
     try {
       audioPlayer.replace({ uri: audioUri });
       audioPlayer.play();
     } catch (error) {
       Alert.alert('Playback Error', 'Could not play voice recording.');
+    }
+  }
+
+  function getSeverityColor(severity?: string) {
+    switch (severity) {
+      case 'Critical':
+        return '#EF4444';
+      case 'High':
+        return '#F97316';
+      case 'Medium':
+        return '#EAB308';
+      default:
+        return '#22C55E';
     }
   }
 
@@ -133,7 +180,7 @@ export default function WalkthroughScreen() {
 
           <View style={styles.statusBadge}>
             <Text style={styles.statusBadgeText}>
-              {isRecording ? '🔴 RECORDING VOICE...' : `📋 ${defects.length} ITEMS LOGGED`}
+              {isRecording ? '🔴 RECORDING VOICE...' : `📋 ${defects.length} PUNCH ITEMS`}
             </Text>
           </View>
         </View>
@@ -144,7 +191,7 @@ export default function WalkthroughScreen() {
             <View style={styles.stagedTextContainer}>
               <Text style={styles.stagedTitle}>Photo Captured</Text>
               <Text style={styles.stagedSubtitle}>
-                {isRecording ? 'Speak defect details now...' : 'Tap Record Voice to describe the issue'}
+                {isRecording ? 'Speak room, defect & severity...' : 'Tap Record Voice to describe the issue'}
               </Text>
             </View>
             {!isRecording && (
@@ -157,21 +204,76 @@ export default function WalkthroughScreen() {
 
         <View style={styles.bottomSection}>
           {defects.length > 0 && (
-            <View>
-              <Text style={styles.stripHint}>Tap a thumbnail below to replay voice note:</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stripScroll}>
-                {defects.map((item, idx) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.stripItem}
-                    onPress={() => playVoiceNote(item.audioUri)}
-                  >
-                    <Image source={{ uri: item.photoUri }} style={styles.stripImage} />
-                    <Text style={styles.stripLabel}>▶ #{defects.length - idx}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cardsScroll}>
+              {defects.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.punchCard, item.expanded && styles.punchCardExpanded]}
+                  onPress={() => toggleExpandCard(item.id)}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.cardHeaderTop}>
+                    <Image source={{ uri: item.photoUri }} style={styles.cardImage} />
+                    <View style={styles.cardContent}>
+                      {item.status === 'analyzing' && (
+                        <View style={styles.analyzingRow}>
+                          <ActivityIndicator size="small" color="#38BDF8" />
+                          <Text style={styles.analyzingText}>AI analyzing...</Text>
+                        </View>
+                      )}
+
+                      {item.status === 'ready' && item.aiData && (
+                        <>
+                          <View style={styles.cardHeaderRow}>
+                            <Text style={styles.locationTag}>{item.aiData.location}</Text>
+                            <View
+                              style={[
+                                styles.severityBadge,
+                                { backgroundColor: getSeverityColor(item.aiData.severity) },
+                              ]}
+                            >
+                              <Text style={styles.severityText}>{item.aiData.severity}</Text>
+                            </View>
+                          </View>
+                          <Text style={styles.defectTitle} numberOfLines={item.expanded ? undefined : 1}>
+                            {item.aiData.defectTitle}
+                          </Text>
+                        </>
+                      )}
+
+                      {item.status === 'error' && (
+                        <Text style={styles.errorText} numberOfLines={3}>
+                          ⚠️ {item.errorMessage}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+
+                  {item.status === 'ready' && item.aiData && (
+                    <View style={styles.expandedSection}>
+                      <Text style={styles.defectDesc} numberOfLines={item.expanded ? undefined : 2}>
+                        {item.aiData.description}
+                      </Text>
+                      <Text style={styles.actionText} numberOfLines={item.expanded ? undefined : 1}>
+                        🛠 {item.aiData.recommendedAction}
+                      </Text>
+                      
+                      <View style={styles.cardFooterRow}>
+                        <Text style={styles.expandHint}>
+                          {item.expanded ? '▲ Tap to collapse' : '▼ Tap to expand'}
+                        </Text>
+                        <TouchableOpacity 
+                          style={styles.playAudioButton}
+                          onPress={() => playVoiceNote(item.audioUri)}
+                        >
+                          <Text style={styles.playAudioText}>▶ Replay Audio</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           )}
 
           <View style={styles.controlsRow}>
@@ -189,10 +291,10 @@ export default function WalkthroughScreen() {
                 !currentPhotoUri && styles.voiceButtonDisabled,
                 isRecording && styles.voiceButtonRecording,
               ]}
-              onPress={isRecording ? stopRecordingAndSaveItem : startRecording}
+              onPress={isRecording ? stopRecordingAndAnalyze : startRecording}
             >
               <Text style={styles.voiceButtonText}>
-                {isRecording ? '⏹ Stop & Save Item' : '🎙 Record Voice'}
+                {isRecording ? '⏹ Stop & Analyze AI' : '🎙 Record Voice'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -223,12 +325,28 @@ const styles = StyleSheet.create({
   stagedTitle: { color: '#FFFFFF', fontWeight: '700', fontSize: 15, marginBottom: 2 },
   stagedSubtitle: { color: '#94A3B8', fontSize: 12 },
   retakeText: { color: '#F87171', fontWeight: '700', fontSize: 13, paddingLeft: 8 },
-  bottomSection: { backgroundColor: '#0F172AD1', paddingTop: 14, paddingBottom: 36, paddingHorizontal: 20 },
-  stripHint: { color: '#94A3B8', fontSize: 11, marginBottom: 6, fontWeight: '600' },
-  stripScroll: { marginBottom: 14 },
-  stripItem: { marginRight: 12, alignItems: 'center' },
-  stripImage: { width: 52, height: 52, borderRadius: 8, borderWidth: 1.5, borderColor: '#38BDF8' },
-  stripLabel: { color: '#38BDF8', fontSize: 11, marginTop: 4, fontWeight: '700' },
+  bottomSection: { backgroundColor: '#0F172AD9', paddingTop: 14, paddingBottom: 36, paddingHorizontal: 16 },
+  cardsScroll: { marginBottom: 14 },
+  punchCard: { backgroundColor: '#1E293B', borderRadius: 12, padding: 10, marginRight: 12, width: 280, borderWidth: 1, borderColor: '#334155' },
+  punchCardExpanded: { width: 310 },
+  cardHeaderTop: { flexDirection: 'row' },
+  cardImage: { width: 58, height: 58, borderRadius: 8, marginRight: 10 },
+  cardContent: { flex: 1, justifyContent: 'center' },
+  analyzingRow: { flexDirection: 'row', alignItems: 'center' },
+  analyzingText: { color: '#38BDF8', fontSize: 12, fontWeight: '600', marginLeft: 6 },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
+  locationTag: { color: '#38BDF8', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  severityBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
+  severityText: { color: '#FFFFFF', fontSize: 8, fontWeight: '800' },
+  defectTitle: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  expandedSection: { marginTop: 8, borderTopWidth: 1, borderTopColor: '#334155', paddingTop: 6 },
+  defectDesc: { color: '#94A3B8', fontSize: 11, lineHeight: 15, marginBottom: 4 },
+  actionText: { color: '#E2E8F0', fontSize: 10, fontWeight: '600', marginBottom: 6 },
+  cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  expandHint: { color: '#64748B', fontSize: 10, fontStyle: 'italic' },
+  playAudioButton: { backgroundColor: '#2563EB', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  playAudioText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+  errorText: { color: '#F87171', fontSize: 11 },
   controlsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
   snapButton: { width: 72, height: 72, borderRadius: 36, borderWidth: 4, borderColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
   snapButtonDimmed: { opacity: 0.5 },
