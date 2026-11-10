@@ -75,10 +75,10 @@ async function buildReportHtml(
     day: 'numeric',
   });
 
+  const openCount = defects.filter((d) => !d.resolved).length;
+  const resolvedCount = defects.filter((d) => d.resolved).length;
   const criticalCount = defects.filter((d) => d.aiData?.severity === 'Critical').length;
   const highCount = defects.filter((d) => d.aiData?.severity === 'High').length;
-  const mediumCount = defects.filter((d) => d.aiData?.severity === 'Medium').length;
-  const lowCount = defects.filter((d) => d.aiData?.severity === 'Low').length;
 
   const cardsHtmlPromises = defects.map(async (item, index) => {
     let imgDataUri = '';
@@ -106,9 +106,10 @@ async function buildReportHtml(
       item.aiData?.recommendedAction || 'Review and repair as needed.'
     );
     const itemNum = defects.length - index;
+    const isResolved = Boolean(item.resolved);
 
     return `
-      <div class="defect-card">
+      <div class="defect-card ${isResolved ? 'card-resolved' : ''}">
         <div class="card-left">
           ${
             imgDataUri
@@ -123,14 +124,24 @@ async function buildReportHtml(
               <span class="location-tag">${location}</span>
               <span class="timestamp">${escapeHtml(item.timestamp)}</span>
             </div>
-            <span class="severity-badge" style="background-color: ${badgeColor};">
-              ${severity.toUpperCase()}
-            </span>
+            <div class="badge-group">
+              <span class="status-badge ${isResolved ? 'status-resolved' : 'status-open'}">
+                ${isResolved ? '✓ RESOLVED' : 'OPEN'}
+              </span>
+              <span class="severity-badge" style="background-color: ${badgeColor};">
+                ${severity.toUpperCase()}
+              </span>
+            </div>
           </div>
           <div class="defect-title">${title}</div>
           <div class="defect-desc">${description}</div>
           <div class="action-box">
             <strong>Recommended Action:</strong> ${action}
+            ${
+              isResolved && item.resolvedAt
+                ? `<div class="resolved-note">Signed off &amp; verified on ${escapeHtml(item.resolvedAt)}</div>`
+                : ''
+            }
           </div>
         </div>
       </div>
@@ -224,6 +235,10 @@ async function buildReportHtml(
             background-color: #FFFFFF;
             page-break-inside: avoid;
           }
+          .card-resolved {
+            background-color: #F8FAFC;
+            border-color: #86EFAC;
+          }
           .card-left {
             width: 145px;
             margin-right: 16px;
@@ -279,6 +294,25 @@ async function buildReportHtml(
             color: #94A3B8;
             font-size: 11px;
           }
+          .badge-group {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+          }
+          .status-badge {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 4px 8px;
+            border-radius: 4px;
+          }
+          .status-open {
+            background-color: #FEF3C7;
+            color: #B45309;
+          }
+          .status-resolved {
+            background-color: #DCFCE7;
+            color: #15803D;
+          }
           .severity-badge {
             color: #FFFFFF;
             font-size: 10px;
@@ -306,6 +340,12 @@ async function buildReportHtml(
             color: #1E293B;
             border-radius: 4px;
           }
+          .resolved-note {
+            margin-top: 4px;
+            color: #15803D;
+            font-weight: 700;
+            font-size: 11px;
+          }
           .footer {
             margin-top: 24px;
             text-align: center;
@@ -321,7 +361,7 @@ async function buildReportHtml(
           <div>
             <div class="brand-badge">WalkPunch AI • Field Inspection Report</div>
             <div class="report-title">${escapeHtml(propertyName)}</div>
-            <div class="property-subtitle">Executive Punch List &amp; Trade Action Summary</div>
+            <div class="property-subtitle">Executive Punch List &amp; Trade Sign-Off Summary</div>
           </div>
           <div class="meta-right">
             <div><strong>Inspector:</strong> ${escapeHtml(inspectorName)}</div>
@@ -336,20 +376,20 @@ async function buildReportHtml(
             <div class="stat-label">Total Logged</div>
           </div>
           <div class="stat-box">
+            <div class="stat-count" style="color: #D97706;">${openCount}</div>
+            <div class="stat-label">Open Items</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-count" style="color: #16A34A;">${resolvedCount}</div>
+            <div class="stat-label">Resolved</div>
+          </div>
+          <div class="stat-box">
             <div class="stat-count" style="color: #DC2626;">${criticalCount}</div>
             <div class="stat-label">Critical</div>
           </div>
           <div class="stat-box">
             <div class="stat-count" style="color: #EA580C;">${highCount}</div>
             <div class="stat-label">High</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-count" style="color: #CA8A04;">${mediumCount}</div>
-            <div class="stat-label">Medium</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-count" style="color: #16A34A;">${lowCount}</div>
-            <div class="stat-label">Low</div>
           </div>
         </div>
 

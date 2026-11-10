@@ -14,6 +14,8 @@ export interface CapturedDefect {
   aiData?: ParsedPunchItem;
   errorMessage?: string;
   expanded?: boolean;
+  resolved?: boolean;
+  resolvedAt?: string;
 }
 
 export interface InspectionProject {
@@ -99,7 +101,6 @@ async function hydrateFromDisk() {
         isHydrated: true,
       };
     } else {
-      // Migrate V1 data if present so existing 1111 Ace Lane inspection is preserved
       const rawV1 = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
       if (rawV1) {
         const parsedV1 = JSON.parse(rawV1);
@@ -152,6 +153,23 @@ export const inspectionStore = {
       defects: state.defects.map((item) =>
         item.id === id ? { ...item, ...updates } : item
       ),
+    };
+    emitChange();
+    persistState();
+  },
+
+  toggleDefectResolved: (id: string) => {
+    state = {
+      ...state,
+      defects: state.defects.map((item) => {
+        if (item.id !== id) return item;
+        const nextResolved = !item.resolved;
+        return {
+          ...item,
+          resolved: nextResolved,
+          resolvedAt: nextResolved ? formatDateStamp() : undefined,
+        };
+      }),
     };
     emitChange();
     persistState();
@@ -213,7 +231,6 @@ export const inspectionStore = {
 
     let updatedArchives = state.savedProjects.filter((p) => p.id !== projectId);
 
-    // Save current active project into archive if it has defects
     if (state.defects.length > 0) {
       const currentSnapshot: InspectionProject = {
         id: state.activeProjectId,
@@ -283,6 +300,7 @@ export function useInspectionStore() {
     setInspectorName: inspectionStore.setInspectorName,
     addDefect: inspectionStore.addDefect,
     updateDefect: inspectionStore.updateDefect,
+    toggleDefectResolved: inspectionStore.toggleDefectResolved,
     updateDefectAiData: inspectionStore.updateDefectAiData,
     deleteDefect: inspectionStore.deleteDefect,
     archiveAndStartNew: inspectionStore.archiveAndStartNew,

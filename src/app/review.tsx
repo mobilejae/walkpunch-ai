@@ -1,10 +1,11 @@
 import { useAudioPlayer } from 'expo-audio';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,8 +18,11 @@ import { savePdfToDevice, sharePdfReport } from '../services/pdfGenerator';
 import { CapturedDefect, useInspectionStore } from '../store/inspectionStore';
 
 const SEVERITIES: Array<ParsedPunchItem['severity']> = ['Low', 'Medium', 'High', 'Critical'];
-const FILTER_OPTIONS: Array<'All' | ParsedPunchItem['severity']> = [
+type FilterOption = 'All' | 'Open' | 'Resolved' | ParsedPunchItem['severity'];
+const FILTER_OPTIONS: FilterOption[] = [
   'All',
+  'Open',
+  'Resolved',
   'Critical',
   'High',
   'Medium',
@@ -35,18 +39,127 @@ export default function ReviewScreen() {
     setInspectorName,
     defects,
     updateDefect,
+    toggleDefectResolved,
     updateDefectAiData,
     deleteDefect,
   } = useInspectionStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedFilter, setSelectedFilter] = useState<'All' | ParsedPunchItem['severity']>('All');
+  const [selectedFilter, setSelectedFilter] = useState<FilterOption>('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [lightboxItem, setLightboxItem] = useState<CapturedDefect | null>(null);
 
-  const filteredDefects =
-    selectedFilter === 'All'
-      ? defects
-      : defects.filter((item) => item.aiData?.severity === selectedFilter);
+  // Pinch-to-zoom and pan state for the full-screen Lightbox
+  const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const touchState = useRef({
+    initialDistance: 0,
+    initialScale: 1,
+    startTouchX: 0,
+    startTouchY: 0,
+    isPinching: false,
+  });
+
+  const openCount = defects.filter((d) => !d.resolved).length;
+  const resolvedCount = defects.filter((d) => d.resolved).length;
+
+  const filteredDefects = defects.filter((item) => {
+    if (selectedFilter === 'Open' && item.resolved) return false;
+    if (selectedFilter === 'Resolved' && !item.resolved) return false;
+    if (
+      ['Critical', 'High', 'Medium', 'Low'].includes(selectedFilter) &&
+      item.aiData?.severity !== selectedFilter
+    ) {
+      return false;
+    }
+
+    if (searchQuery.trim().length > 0) {
+      const q = searchQuery.toLowerCase();
+      const loc = item.aiData?.location?.toLowerCase() || '';
+      const title = item.aiData?.defectTitle?.toLowerCase() || '';
+      const desc = item.aiData?.description?.toLowerCase() || '';
+      const act = item.aiData?.recommendedAction?.toLowerCase() || '';
+      return loc.includes(q) || title.includes(q) || desc.includes(q) || act.includes(q);
+    }
+
+    return true;
+  });
+
+  function openLightbox(item: CapturedDefect) {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setLightboxItem(item);
+  }
+
+  function closeLightbox() {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setLightboxItem(null);
+  }
+
+  function setPresetZoom(targetScale: number) {
+    setZoomScale(targetScale);
+    if (targetScale === 1) {
+      setPanOffset({ x: 0, y: 0 });
+    }
+  }
+
+  function getTouchDistance(touches: any[]) {
+    const dx = touches[0].pageX - touches[1].pageX;
+    const dy = touches[0].pageY - touches[1].pageY;
+    return Math.hypot(dx, dy);
+  }
+
+  function handleLightboxTouchStart(e: any) {
+    const touches = e.nativeEvent.touches;
+    if (touches.length === 2) {
+      touchState.current.isPinching = true;
+      touchState.current.initialDistance = getTouchDistance(touches);
+      touchState.current.initialScale = zoomScale;
+    } else if (touches.length === 1 && zoomScale > 1) {
+      touchState.current.isPinching = false;
+      touchState.current.startTouchX = touches[0].pageX - panOffset.x;
+      touchState.current.startTouchY = touches[0].pageY - panOffset.y;
+    }
+  }
+
+  function handleLightboxTouchMove(e: any) {
+    const touches = e.nativeEvent.touches;
+    if (touches.length === 2) {
+      const currentDist = getTouchDistance(touches);
+      if (touchState.current.initialDistance > 0) {
+        const ratio = currentDist / touchState.current.initialDistance;
+        const nextScale = Math.min(
+          Math.max(touchState.current.initialScale * ratio, 1),
+          4
+        );
+        setZoomScale(nextScale);
+        if (nextScale <= 1.05) {
+          setPanOffset({ x: 0, y: 0 });
+        }
+      }
+    } else if (
+      touches.length === 1 &&
+      zoomScale > 1 &&
+      !touchState.current.isPinching
+    ) {
+      const nextX = touches[0].pageX - touchState.current.startTouchX;
+      const nextY = touches[0].pageY - touchState.current.startTouchY;
+      setPanOffset({ x: nextX, y: nextY });
+    }
+  }
+
+  function handleLightboxTouchEnd(e: any) {
+    const touches = e.nativeEvent.touches;
+    if (touches.length < 2) {
+      touchState.current.isPinching = false;
+    }
+    if (touches.length === 1 && zoomScale > 1) {
+      touchState.current.startTouchX = touches[0].pageX - panOffset.x;
+      touchState.current.startTouchY = touches[0].pageY - panOffset.y;
+    }
+  }
 
   function playVoiceNote(audioUri: string | null) {
     if (!audioUri) return;
@@ -163,9 +276,14 @@ export default function ReviewScreen() {
             placeholderTextColor="#64748B"
           />
 
-          <Text style={styles.summaryText}>
-            Showing {filteredDefects.length} of {defects.length} Saved Defects
-          </Text>
+          <View style={styles.statsRow}>
+            <Text style={styles.summaryText}>
+              Showing {filteredDefects.length} of {defects.length} Items
+            </Text>
+            <Text style={styles.signOffStatsText}>
+              {openCount} Open • {resolvedCount} Resolved
+            </Text>
+          </View>
 
           {defects.length > 0 && (
             <View style={styles.pdfActionsRow}>
@@ -193,31 +311,41 @@ export default function ReviewScreen() {
         </View>
 
         {defects.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterBar}
-          >
-            {FILTER_OPTIONS.map((filter) => {
-              const active = selectedFilter === filter;
-              return (
-                <TouchableOpacity
-                  key={filter}
-                  style={[styles.filterChip, active && styles.filterChipActive]}
-                  onPress={() => setSelectedFilter(filter)}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      active && styles.filterChipTextActive,
-                    ]}
+          <>
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="🔍 Search by room, trade, or keyword (e.g., Kitchen, Drywall)..."
+              placeholderTextColor="#64748B"
+            />
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterBar}
+            >
+              {FILTER_OPTIONS.map((filter) => {
+                const active = selectedFilter === filter;
+                return (
+                  <TouchableOpacity
+                    key={filter}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => setSelectedFilter(filter)}
                   >
-                    {filter}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        active && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {filter}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
         )}
 
         {filteredDefects.length === 0 ? (
@@ -225,12 +353,12 @@ export default function ReviewScreen() {
             <Text style={styles.emptyTitle}>
               {defects.length === 0
                 ? 'No Punch Items Logged Yet'
-                : `No ${selectedFilter} Severity Items`}
+                : 'No Matching Punch Items'}
             </Text>
             <Text style={styles.emptySubtitle}>
               {defects.length === 0
                 ? 'Return to the camera walkthrough to capture photos and voice notes.'
-                : 'Switch the filter above to view all logged defects.'}
+                : 'Clear your search query or switch the filter chip above.'}
             </Text>
             {defects.length === 0 && (
               <TouchableOpacity
@@ -244,10 +372,24 @@ export default function ReviewScreen() {
         ) : (
           filteredDefects.map((item, index) => {
             const isEditing = editingId === item.id;
+            const isResolved = Boolean(item.resolved);
+
             return (
-              <View key={item.id} style={styles.defectCard}>
+              <View
+                key={item.id}
+                style={[styles.defectCard, isResolved && styles.defectCardResolved]}
+              >
                 <View style={styles.cardTopRow}>
-                  <Image source={{ uri: item.photoUri }} style={styles.defectImage} />
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => openLightbox(item)}
+                  >
+                    <Image source={{ uri: item.photoUri }} style={styles.defectImage} />
+                    <View style={styles.zoomHintBadge}>
+                      <Text style={styles.zoomHintText}>🔍 Zoom</Text>
+                    </View>
+                  </TouchableOpacity>
+
                   <View style={styles.cardTopInfo}>
                     <View style={styles.badgeRow}>
                       <Text style={styles.itemIndex}>#{filteredDefects.length - index}</Text>
@@ -260,6 +402,11 @@ export default function ReviewScreen() {
                           ]}
                         >
                           <Text style={styles.severityBadgeText}>{item.aiData.severity}</Text>
+                        </View>
+                      )}
+                      {isResolved && (
+                        <View style={styles.resolvedBadge}>
+                          <Text style={styles.resolvedBadgeText}>✓ RESOLVED</Text>
                         </View>
                       )}
                     </View>
@@ -275,7 +422,14 @@ export default function ReviewScreen() {
                     {item.aiData && !isEditing && (
                       <>
                         <Text style={styles.locationText}>{item.aiData.location}</Text>
-                        <Text style={styles.titleText}>{item.aiData.defectTitle}</Text>
+                        <Text
+                          style={[
+                            styles.titleText,
+                            isResolved && styles.titleTextResolved,
+                          ]}
+                        >
+                          {item.aiData.defectTitle}
+                        </Text>
                       </>
                     )}
                   </View>
@@ -285,6 +439,11 @@ export default function ReviewScreen() {
                   <View style={styles.detailsBox}>
                     <Text style={styles.descText}>{item.aiData.description}</Text>
                     <Text style={styles.actionText}>🛠 {item.aiData.recommendedAction}</Text>
+                    {isResolved && item.resolvedAt && (
+                      <Text style={styles.resolvedTimestampText}>
+                        ✓ Signed off on {item.resolvedAt}
+                      </Text>
+                    )}
                   </View>
                 )}
 
@@ -344,6 +503,23 @@ export default function ReviewScreen() {
 
                 <View style={styles.cardActionsRow}>
                   <TouchableOpacity
+                    style={[
+                      styles.resolveBtn,
+                      isResolved && styles.resolveBtnActive,
+                    ]}
+                    onPress={() => toggleDefectResolved(item.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.resolveBtnText,
+                        isResolved && styles.resolveBtnTextActive,
+                      ]}
+                    >
+                      {isResolved ? '✓ Resolved' : '○ Sign Off'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
                     style={styles.audioBtn}
                     onPress={() => playVoiceNote(item.audioUri)}
                   >
@@ -366,7 +542,7 @@ export default function ReviewScreen() {
                       style={styles.retryBtn}
                       onPress={() => retryAiAnalysis(item)}
                     >
-                      <Text style={styles.retryBtnText}>↻ Retry AI</Text>
+                      <Text style={styles.retryBtnText}>↻ AI</Text>
                     </TouchableOpacity>
                   )}
 
@@ -374,7 +550,7 @@ export default function ReviewScreen() {
                     style={styles.deleteBtn}
                     onPress={() => confirmDelete(item.id)}
                   >
-                    <Text style={styles.deleteBtnText}>Delete</Text>
+                    <Text style={styles.deleteBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -382,6 +558,87 @@ export default function ReviewScreen() {
           })
         )}
       </ScrollView>
+
+      <Modal
+        visible={Boolean(lightboxItem)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeLightbox}
+      >
+        <View style={styles.lightboxBackdrop}>
+          <View style={styles.lightboxHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lightboxLocation}>
+                {lightboxItem?.aiData?.location || 'INSPECTION PHOTO'}
+              </Text>
+              <Text style={styles.lightboxTitle}>
+                {lightboxItem?.aiData?.defectTitle || 'Captured Defect'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.lightboxCloseBtn}
+              onPress={closeLightbox}
+            >
+              <Text style={styles.lightboxCloseText}>✕ Close</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View
+            style={styles.lightboxCanvas}
+            onTouchStart={handleLightboxTouchStart}
+            onTouchMove={handleLightboxTouchMove}
+            onTouchEnd={handleLightboxTouchEnd}
+          >
+            {lightboxItem && (
+              <Image
+                source={{ uri: lightboxItem.photoUri }}
+                style={[
+                  styles.lightboxImage,
+                  {
+                    transform: [
+                      { translateX: panOffset.x },
+                      { translateY: panOffset.y },
+                      { scale: zoomScale },
+                    ],
+                  },
+                ]}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+
+          <View style={styles.zoomControlsRow}>
+            <Text style={styles.zoomStatusText}>
+              Pinch or tap to zoom ({zoomScale.toFixed(1)}x)
+            </Text>
+            <View style={styles.zoomButtonsGroup}>
+              {[1, 2, 3].map((preset) => (
+                <TouchableOpacity
+                  key={preset}
+                  style={[
+                    styles.zoomPresetBtn,
+                    Math.round(zoomScale) === preset && styles.zoomPresetBtnActive,
+                  ]}
+                  onPress={() => setPresetZoom(preset)}
+                >
+                  <Text style={styles.zoomPresetText}>{preset}x</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {lightboxItem?.aiData && (
+            <View style={styles.lightboxFooter}>
+              <Text style={styles.lightboxDesc}>
+                {lightboxItem.aiData.description}
+              </Text>
+              <Text style={styles.lightboxAction}>
+                🛠 {lightboxItem.aiData.recommendedAction}
+              </Text>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -426,7 +683,14 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
     marginBottom: 10,
   },
-  summaryText: { color: '#94A3B8', fontSize: 13, fontWeight: '600', marginBottom: 12 },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  summaryText: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
+  signOffStatsText: { color: '#38BDF8', fontSize: 12, fontWeight: '800' },
   pdfActionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -448,6 +712,17 @@ const styles = StyleSheet.create({
   },
   disabledBtn: { opacity: 0.6 },
   pdfBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  searchInput: {
+    backgroundColor: '#1E293B',
+    color: '#FFFFFF',
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 10,
+  },
   filterBar: { marginBottom: 14 },
   filterChip: {
     backgroundColor: '#1E293B',
@@ -477,16 +752,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
+  defectCardResolved: {
+    borderColor: '#16A34A',
+    backgroundColor: '#132235',
+  },
   cardTopRow: { flexDirection: 'row', marginBottom: 10 },
   defectImage: { width: 84, height: 84, borderRadius: 10, marginRight: 12 },
+  zoomHintBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: '#0F172ACC',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  zoomHintText: { color: '#E2E8F0', fontSize: 9, fontWeight: '700' },
   cardTopInfo: { flex: 1, justifyContent: 'center' },
-  badgeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  itemIndex: { color: '#38BDF8', fontWeight: '800', fontSize: 12, marginRight: 8 },
-  timestampText: { color: '#64748B', fontSize: 11, marginRight: 8 },
-  severityBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 4, gap: 4 },
+  itemIndex: { color: '#38BDF8', fontWeight: '800', fontSize: 12, marginRight: 4 },
+  timestampText: { color: '#64748B', fontSize: 11, marginRight: 4 },
+  severityBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   severityBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  resolvedBadge: {
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  resolvedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   locationText: { color: '#38BDF8', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
   titleText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginTop: 2 },
+  titleTextResolved: { color: '#86EFAC', textDecorationLine: 'line-through' },
   analyzingText: { color: '#38BDF8', fontSize: 13, fontWeight: '600' },
   errorText: { color: '#F87171', fontSize: 12 },
   detailsBox: {
@@ -497,6 +794,12 @@ const styles = StyleSheet.create({
   },
   descText: { color: '#CBD5E1', fontSize: 13, lineHeight: 19, marginBottom: 6 },
   actionText: { color: '#38BDF8', fontSize: 12, fontWeight: '700' },
+  resolvedTimestampText: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 6,
+  },
   editForm: {
     backgroundColor: '#0F172A',
     padding: 12,
@@ -528,12 +831,127 @@ const styles = StyleSheet.create({
   },
   sevOptionText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   cardActionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  audioBtn: { backgroundColor: '#2563EB', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8 },
-  audioBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  editBtn: { backgroundColor: '#334155', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8 },
-  editBtnText: { color: '#E2E8F0', fontSize: 12, fontWeight: '700' },
-  retryBtn: { backgroundColor: '#0284C7', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8 },
-  retryBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  resolveBtn: {
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#16A34A',
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+  },
+  resolveBtnActive: {
+    backgroundColor: '#16A34A',
+  },
+  resolveBtnText: { color: '#4ADE80', fontSize: 11, fontWeight: '800' },
+  resolveBtnTextActive: { color: '#FFFFFF' },
+  audioBtn: { backgroundColor: '#2563EB', paddingVertical: 8, paddingHorizontal: 9, borderRadius: 8 },
+  audioBtnText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  editBtn: { backgroundColor: '#334155', paddingVertical: 8, paddingHorizontal: 9, borderRadius: 8 },
+  editBtnText: { color: '#E2E8F0', fontSize: 11, fontWeight: '700' },
+  retryBtn: { backgroundColor: '#0284C7', paddingVertical: 8, paddingHorizontal: 8, borderRadius: 8 },
+  retryBtnText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
   deleteBtn: { paddingVertical: 8, paddingHorizontal: 8 },
-  deleteBtnText: { color: '#F87171', fontSize: 12, fontWeight: '700' },
+  deleteBtnText: { color: '#F87171', fontSize: 13, fontWeight: '800' },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: '#000000F2',
+    justifyContent: 'space-between',
+    paddingTop: 54,
+    paddingBottom: 32,
+    paddingHorizontal: 16,
+  },
+  lightboxHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  lightboxLocation: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  lightboxTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  lightboxCloseBtn: {
+    backgroundColor: '#334155',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  lightboxCloseText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  lightboxCanvas: {
+    flex: 1,
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#090D16',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '100%',
+  },
+  zoomControlsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingHorizontal: 4,
+  },
+  zoomStatusText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  zoomButtonsGroup: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  zoomPresetBtn: {
+    backgroundColor: '#1E293B',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  zoomPresetBtnActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#38BDF8',
+  },
+  zoomPresetText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  lightboxFooter: {
+    backgroundColor: '#1E293B',
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  lightboxDesc: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 6,
+  },
+  lightboxAction: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
