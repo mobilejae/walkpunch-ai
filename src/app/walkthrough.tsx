@@ -38,8 +38,9 @@ export default function WalkthroughScreen() {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
 
-  // Camera zoom state (0 = 1x wide, 1 = max hardware zoom)
+  // Camera zoom & flashlight torch state
   const [cameraZoom, setCameraZoom] = useState(0);
+  const [isTorchOn, setIsTorchOn] = useState(false);
   const pinchState = useRef({
     initialDistance: 0,
     initialZoom: 0,
@@ -118,6 +119,7 @@ export default function WalkthroughScreen() {
         throw new Error('Failed to capture photo.');
       }
 
+      setIsTorchOn(false);
       setCapturedPhotoUri(photo.uri);
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
@@ -261,7 +263,27 @@ export default function WalkthroughScreen() {
             style={styles.camera}
             facing="back"
             zoom={cameraZoom}
+            enableTorch={isTorchOn}
           />
+        )}
+
+        {!capturedPhotoUri && (
+          <TouchableOpacity
+            style={[
+              styles.torchToggleBtn,
+              isTorchOn && styles.torchToggleBtnActive,
+            ]}
+            onPress={() => setIsTorchOn((prev) => !prev)}
+          >
+            <Text
+              style={[
+                styles.torchToggleText,
+                isTorchOn && styles.torchToggleTextActive,
+              ]}
+            >
+              {isTorchOn ? '🔦 Light ON' : '🔦 Light OFF'}
+            </Text>
+          </TouchableOpacity>
         )}
 
         {!capturedPhotoUri && (
@@ -456,6 +478,29 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  torchToggleBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: '#0F172ACC',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  torchToggleBtnActive: {
+    backgroundColor: '#EAB308',
+    borderColor: '#FEF08A',
+  },
+  torchToggleText: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  torchToggleTextActive: {
+    color: '#0F172A',
   },
   zoomOverlayContainer: {
     position: 'absolute',

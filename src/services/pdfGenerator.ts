@@ -4,7 +4,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
-import { CapturedDefect } from '../store/inspectionStore';
+import { CapturedDefect, getDefectMarkers } from '../store/inspectionStore';
 
 function escapeHtml(text?: string): string {
   if (!text) return '';
@@ -22,6 +22,12 @@ function sanitizeFileName(name: string): string {
     .replace(/[\\/:*?"<>|]+/g, '')
     .replace(/\s+/g, '_');
   return cleaned || 'Inspection_Report';
+}
+
+function escapeCsvCell(val?: string | number | null): string {
+  if (val === null || val === undefined) return '""';
+  const str = String(val).replace(/"/g, '""');
+  return `"${str}"`;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -107,17 +113,23 @@ async function buildReportHtml(
     );
     const itemNum = defects.length - index;
     const isResolved = Boolean(item.resolved);
+    const markers = getDefectMarkers(item);
 
-    const markerHtml = item.marker
-      ? `<div class="pdf-marker" style="left: ${item.marker.xPct}%; top: ${item.marker.yPct}%;"><div class="pdf-marker-dot"></div></div>`
-      : '';
+    const markersHtml = markers
+      .map(
+        (m, mIdx) =>
+          `<div class="pdf-marker" style="left: ${m.xPct}%; top: ${m.yPct}%;"><span class="pdf-marker-num">${
+            mIdx + 1
+          }</span></div>`
+      )
+      .join('');
 
     return `
       <div class="defect-card ${isResolved ? 'card-resolved' : ''}">
         <div class="card-left">
           ${
             imgDataUri
-              ? `<div class="photo-wrapper"><img src="${imgDataUri}" class="defect-photo" />${markerHtml}</div>`
+              ? `<div class="photo-wrapper"><img src="${imgDataUri}" class="defect-photo" />${markersHtml}</div>`
               : `<div class="no-photo">No Photo</div>`
           }
         </div>
@@ -264,23 +276,23 @@ async function buildReportHtml(
           }
           .pdf-marker {
             position: absolute;
-            width: 28px;
-            height: 28px;
-            margin-left: -14px;
-            margin-top: -14px;
-            border: 3px solid #EF4444;
+            width: 24px;
+            height: 24px;
+            margin-left: -12px;
+            margin-top: -12px;
+            border: 2.5px solid #EF4444;
             border-radius: 50%;
-            background-color: rgba(239, 68, 68, 0.22);
+            background-color: rgba(239, 68, 68, 0.35);
             box-sizing: border-box;
             display: flex;
             align-items: center;
             justify-content: center;
           }
-          .pdf-marker-dot {
-            width: 6px;
-            height: 6px;
-            background-color: #EF4444;
-            border-radius: 50%;
+          .pdf-marker-num {
+            color: #FFFFFF;
+            font-size: 10px;
+            font-weight: 900;
+            text-shadow: 0 1px 2px #000000;
           }
           .no-photo {
             width: 145px;
@@ -563,6 +575,121 @@ export async function sharePdfReport(
       mimeType: 'application/pdf',
       dialogTitle: `${propertyName} - Inspection Report`,
       UTI: 'com.adobe.pdf',
+    });
+  }
+}
+
+function generateCsvString(propertyName: string, inspectorName: string, defects: CapturedDefect[]): string {
+  const headers = [
+    'Item #',
+    'Property',
+    'Inspector',
+    'Status',
+    'Severity',
+    'Location',
+    'Defect Title',
+    'Description',
+    'Recommended Trade Action',
+    'Callout Markers',
+    'Logged Time',
+    'Signed Off Date',
+  ];
+
+  const rows = defects.map((item, idx) => {
+    const itemNum = defects.length - idx;
+    const status = item.resolved ? 'RESOLVED' : 'OPEN';
+    const severity = item.aiData?.severity || 'Medium';
+    const location = item.aiData?.location || 'UNASSIGNED';
+    const title = item.aiData?.defectTitle || 'Logged Defect';
+    const desc = item.aiData?.description || '';
+    const action = item.aiData?.recommendedAction || '';
+    const markerCount = getDefectMarkers(item).length;
+
+    return [
+      itemNum,
+      propertyName,
+      inspectorName,
+      status,
+      severity,
+      location,
+      title,
+      desc,
+      action,
+      markerCount,
+      item.timestamp,
+      item.resolvedAt || '',
+    ]
+      .map(escapeCsvCell)
+      .join(',');
+  });
+
+  return '\uFEFF' + [headers.map(escapeCsvCell).join(','), ...rows].join('\r\n');
+}
+
+export async function saveCsvToDevice(
+  propertyName: string,
+  inspectorName: string,
+  defects: CapturedDefect[]
+): Promise<string | null> {
+  const csvString = generateCsvString(propertyName, inspectorName, defects);
+  const fileName = `${sanitizeFileName(propertyName)}_Punch_List.csv`;
+
+  if (Platform.OS === 'android') {
+    const SAF = LegacyFileSystem.StorageAccessFramework;
+    const permissions = await SAF.requestDirectoryPermissionsAsync();
+    if (!permissions.granted) {
+      return null;
+    }
+
+    const fileUri = await SAF.createFileAsync(
+      permissions.directoryUri,
+      fileName,
+      'text/csv'
+    );
+
+    await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
+      encoding: LegacyFileSystem.EncodingType.UTF8,
+    });
+
+    console.log('[WalkPunch CSV] Saved directly to device folder:', fileUri);
+    return fileName;
+  } else {
+    // Fallback for iOS / web
+    const fileUri = `${LegacyFileSystem.cacheDirectory}${fileName}`;
+    await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
+      encoding: LegacyFileSystem.EncodingType.UTF8,
+    });
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'text/csv',
+        dialogTitle: `${propertyName} - Trade Punch List CSV`,
+        UTI: 'public.comma-separated-values-text',
+      });
+    }
+    return fileName;
+  }
+}
+
+export async function shareCsvReport(
+  propertyName: string,
+  inspectorName: string,
+  defects: CapturedDefect[]
+): Promise<void> {
+  const csvString = generateCsvString(propertyName, inspectorName, defects);
+  const fileName = `${sanitizeFileName(propertyName)}_Punch_List.csv`;
+  const fileUri = `${LegacyFileSystem.cacheDirectory}${fileName}`;
+
+  await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
+    encoding: LegacyFileSystem.EncodingType.UTF8,
+  });
+
+  const canShare = await Sharing.isAvailableAsync();
+  if (canShare) {
+    await Sharing.shareAsync(fileUri, {
+      mimeType: 'text/csv',
+      dialogTitle: `${propertyName} - Trade Punch List CSV`,
+      UTI: 'public.comma-separated-values-text',
     });
   }
 }

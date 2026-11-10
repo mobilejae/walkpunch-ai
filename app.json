@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "walkpunch-ai",
+    "name": "WalkPunch AI",
     "slug": "walkpunch-ai",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,9 +8,15 @@
     "scheme": "walkpunchai",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.walkpunch.ai"
     },
     "android": {
+      "package": "com.walkpunch.ai",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -32,6 +38,7 @@
           "imageWidth": 76
         }
       ],
+      "expo-camera",
       "expo-audio",
       "expo-sharing"
     ],

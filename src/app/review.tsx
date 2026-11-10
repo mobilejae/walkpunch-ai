@@ -14,7 +14,12 @@ import {
   View,
 } from 'react-native';
 import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
-import { savePdfToDevice, sharePdfReport } from '../services/pdfGenerator';
+import {
+  saveCsvToDevice,
+  savePdfToDevice,
+  shareCsvReport,
+  sharePdfReport,
+} from '../services/pdfGenerator';
 import {
   CapturedDefect,
   getDefectMarkers,
@@ -250,6 +255,42 @@ export default function ReviewScreen() {
     }
   }
 
+  async function handleSaveCsv() {
+    if (defects.length === 0) {
+      Alert.alert('No Punch Items', 'Log at least one defect before saving a CSV file.');
+      return;
+    }
+    try {
+      setIsExportingPdf(true);
+      const savedFileName = await saveCsvToDevice(propertyName, inspectorName, defects);
+      if (savedFileName) {
+        Alert.alert(
+          'CSV Saved to Phone',
+          `${savedFileName} was saved to your selected device folder.`
+        );
+      }
+    } catch (error: any) {
+      Alert.alert('CSV Save Error', error?.message || 'Could not save CSV to device.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
+
+  async function handleShareCsv() {
+    if (defects.length === 0) {
+      Alert.alert('No Punch Items', 'Log at least one defect before sharing a CSV file.');
+      return;
+    }
+    try {
+      setIsExportingPdf(true);
+      await shareCsvReport(propertyName, inspectorName, defects);
+    } catch (error: any) {
+      Alert.alert('CSV Share Error', error?.message || 'Could not share CSV file.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
+
   async function retryAiAnalysis(item: CapturedDefect) {
     if (!item.audioUri) {
       Alert.alert('Missing Audio', 'No voice recording found for this item.');
@@ -369,26 +410,46 @@ export default function ReviewScreen() {
           )}
 
           {defects.length > 0 && (
-            <View style={styles.pdfActionsRow}>
-              <TouchableOpacity
-                style={[styles.pdfSaveBtn, isExportingPdf && styles.disabledBtn]}
-                onPress={handleSavePdf}
-                disabled={isExportingPdf}
-              >
-                {isExportingPdf ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.pdfBtnText}>💾 Save PDF to Phone</Text>
-                )}
-              </TouchableOpacity>
+            <View style={styles.exportGrid}>
+              <View style={styles.exportRow}>
+                <TouchableOpacity
+                  style={[styles.pdfSaveBtn, isExportingPdf && styles.disabledBtn]}
+                  onPress={handleSavePdf}
+                  disabled={isExportingPdf}
+                >
+                  {isExportingPdf ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.pdfBtnText}>💾 Save PDF</Text>
+                  )}
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.pdfShareBtn, isExportingPdf && styles.disabledBtn]}
-                onPress={handleSharePdf}
-                disabled={isExportingPdf}
-              >
-                <Text style={styles.pdfBtnText}>📤 Share PDF</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pdfShareBtn, isExportingPdf && styles.disabledBtn]}
+                  onPress={handleSharePdf}
+                  disabled={isExportingPdf}
+                >
+                  <Text style={styles.pdfBtnText}>📤 Share PDF</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.exportRow}>
+                <TouchableOpacity
+                  style={[styles.csvSaveBtn, isExportingPdf && styles.disabledBtn]}
+                  onPress={handleSaveCsv}
+                  disabled={isExportingPdf}
+                >
+                  <Text style={styles.pdfBtnText}>💾 Save CSV</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.csvShareBtn, isExportingPdf && styles.disabledBtn]}
+                  onPress={handleShareCsv}
+                  disabled={isExportingPdf}
+                >
+                  <Text style={styles.pdfBtnText}>📤 Share CSV</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -866,10 +927,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  pdfActionsRow: {
+  exportGrid: {
+    gap: 8,
+  },
+  exportRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
+    gap: 8,
   },
   pdfSaveBtn: {
     flex: 1,
@@ -885,8 +948,22 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
+  csvSaveBtn: {
+    flex: 1,
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  csvShareBtn: {
+    flex: 1,
+    backgroundColor: '#0284C7',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
   disabledBtn: { opacity: 0.6 },
-  pdfBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  pdfBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   searchInput: {
     backgroundColor: '#1E293B',
     color: '#FFFFFF',
