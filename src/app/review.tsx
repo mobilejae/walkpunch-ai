@@ -15,7 +15,11 @@ import {
 } from 'react-native';
 import { analyzeDefectWithAI, ParsedPunchItem } from '../services/gemini';
 import { savePdfToDevice, sharePdfReport } from '../services/pdfGenerator';
-import { CapturedDefect, useInspectionStore } from '../store/inspectionStore';
+import {
+  CapturedDefect,
+  getDefectMarkers,
+  useInspectionStore,
+} from '../store/inspectionStore';
 
 const SEVERITIES: Array<ParsedPunchItem['severity']> = ['Low', 'Medium', 'High', 'Critical'];
 type FilterOption = 'All' | 'Open' | 'Resolved' | ParsedPunchItem['severity'];
@@ -29,6 +33,12 @@ const FILTER_OPTIONS: FilterOption[] = [
   'Low',
 ];
 
+function isPendingAiSync(item: CapturedDefect): boolean {
+  if (item.status === 'error') return true;
+  if (item.aiData?.defectTitle === 'Logged Defect (Tap Edit or Retry AI)') return true;
+  return false;
+}
+
 export default function ReviewScreen() {
   const router = useRouter();
   const audioPlayer = useAudioPlayer(null);
@@ -39,6 +49,9 @@ export default function ReviewScreen() {
     setInspectorName,
     defects,
     updateDefect,
+    addDefectMarker,
+    undoDefectMarker,
+    clearDefectMarkers,
     toggleDefectResolved,
     updateDefectAiData,
     deleteDefect,
@@ -48,9 +61,11 @@ export default function ReviewScreen() {
   const [selectedFilter, setSelectedFilter] = useState<FilterOption>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [lightboxItem, setLightboxItem] = useState<CapturedDefect | null>(null);
+  const [isBatchSyncing, setIsBatchSyncing] = useState(false);
+  const [lightboxItemId, setLightboxItemId] = useState<string | null>(null);
+  const [isMarkerMode, setIsMarkerMode] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 320, height: 320 });
 
-  // Pinch-to-zoom and pan state for the full-screen Lightbox
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const touchState = useRef({
@@ -61,8 +76,11 @@ export default function ReviewScreen() {
     isPinching: false,
   });
 
+  const lightboxItem = defects.find((d) => d.id === lightboxItemId) || null;
+  const activeLightboxMarkers = getDefectMarkers(lightboxItem);
   const openCount = defects.filter((d) => !d.resolved).length;
   const resolvedCount = defects.filter((d) => d.resolved).length;
+  const pendingAiItems = defects.filter(isPendingAiSync);
 
   const filteredDefects = defects.filter((item) => {
     if (selectedFilter === 'Open' && item.resolved) return false;
@@ -89,18 +107,30 @@ export default function ReviewScreen() {
   function openLightbox(item: CapturedDefect) {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
-    setLightboxItem(item);
+    setIsMarkerMode(false);
+    setLightboxItemId(item.id);
   }
 
   function closeLightbox() {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
-    setLightboxItem(null);
+    setIsMarkerMode(false);
+    setLightboxItemId(null);
   }
 
   function setPresetZoom(targetScale: number) {
+    setIsMarkerMode(false);
     setZoomScale(targetScale);
     if (targetScale === 1) {
+      setPanOffset({ x: 0, y: 0 });
+    }
+  }
+
+  function toggleMarkerMode() {
+    const nextMode = !isMarkerMode;
+    setIsMarkerMode(nextMode);
+    if (nextMode) {
+      setZoomScale(1);
       setPanOffset({ x: 0, y: 0 });
     }
   }
@@ -113,6 +143,18 @@ export default function ReviewScreen() {
 
   function handleLightboxTouchStart(e: any) {
     const touches = e.nativeEvent.touches;
+
+    if (isMarkerMode && touches.length === 1 && lightboxItem) {
+      const { locationX, locationY } = e.nativeEvent;
+      const xPct = Math.min(Math.max((locationX / canvasSize.width) * 100, 4), 96);
+      const yPct = Math.min(Math.max((locationY / canvasSize.height) * 100, 4), 96);
+      addDefectMarker(lightboxItem.id, {
+        xPct: Math.round(xPct * 10) / 10,
+        yPct: Math.round(yPct * 10) / 10,
+      });
+      return;
+    }
+
     if (touches.length === 2) {
       touchState.current.isPinching = true;
       touchState.current.initialDistance = getTouchDistance(touches);
@@ -125,6 +167,7 @@ export default function ReviewScreen() {
   }
 
   function handleLightboxTouchMove(e: any) {
+    if (isMarkerMode) return;
     const touches = e.nativeEvent.touches;
     if (touches.length === 2) {
       const currentDist = getTouchDistance(touches);
@@ -224,6 +267,29 @@ export default function ReviewScreen() {
     }
   }
 
+  async function handleBatchSyncPendingAi() {
+    if (pendingAiItems.length === 0 || isBatchSyncing) return;
+    try {
+      setIsBatchSyncing(true);
+      for (const item of pendingAiItems) {
+        if (!item.audioUri) continue;
+        updateDefect(item.id, { status: 'analyzing', errorMessage: undefined });
+        const aiResult = await analyzeDefectWithAI(item.photoUri, item.audioUri);
+        updateDefect(item.id, { status: 'ready', aiData: aiResult });
+      }
+      Alert.alert(
+        'Batch AI Sync Complete',
+        `Processed ${pendingAiItems.length} pending punch ${
+          pendingAiItems.length === 1 ? 'item' : 'items'
+        }.`
+      );
+    } catch (error: any) {
+      Alert.alert('Batch Sync Error', error?.message || 'Some items could not be analyzed.');
+    } finally {
+      setIsBatchSyncing(false);
+    }
+  }
+
   function confirmDelete(id: string) {
     Alert.alert('Delete Punch Item', 'Remove this defect from the inspection report?', [
       { text: 'Cancel', style: 'cancel' },
@@ -284,6 +350,23 @@ export default function ReviewScreen() {
               {openCount} Open • {resolvedCount} Resolved
             </Text>
           </View>
+
+          {pendingAiItems.length > 0 && (
+            <TouchableOpacity
+              style={[styles.batchSyncBtn, isBatchSyncing && styles.disabledBtn]}
+              onPress={handleBatchSyncPendingAi}
+              disabled={isBatchSyncing}
+            >
+              {isBatchSyncing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.batchSyncBtnText}>
+                  ⚡ Sync {pendingAiItems.length} Pending AI{' '}
+                  {pendingAiItems.length === 1 ? 'Item' : 'Items'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
 
           {defects.length > 0 && (
             <View style={styles.pdfActionsRow}>
@@ -373,6 +456,7 @@ export default function ReviewScreen() {
           filteredDefects.map((item, index) => {
             const isEditing = editingId === item.id;
             const isResolved = Boolean(item.resolved);
+            const itemMarkers = getDefectMarkers(item);
 
             return (
               <View
@@ -383,10 +467,28 @@ export default function ReviewScreen() {
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={() => openLightbox(item)}
+                    style={styles.thumbWrapper}
                   >
                     <Image source={{ uri: item.photoUri }} style={styles.defectImage} />
+                    {itemMarkers.map((m, mIdx) => (
+                      <View
+                        key={`${item.id}-m-${mIdx}`}
+                        pointerEvents="none"
+                        style={[
+                          styles.thumbMarkerRing,
+                          {
+                            left: `${m.xPct}%`,
+                            top: `${m.yPct}%`,
+                          },
+                        ]}
+                      />
+                    ))}
                     <View style={styles.zoomHintBadge}>
-                      <Text style={styles.zoomHintText}>🔍 Zoom</Text>
+                      <Text style={styles.zoomHintText}>
+                        {itemMarkers.length > 0
+                          ? `🎯 ${itemMarkers.length}`
+                          : '🔍 Zoom'}
+                      </Text>
                     </View>
                   </TouchableOpacity>
 
@@ -584,16 +686,24 @@ export default function ReviewScreen() {
           </View>
 
           <View
-            style={styles.lightboxCanvas}
+            style={[
+              styles.lightboxCanvas,
+              isMarkerMode && styles.lightboxCanvasMarkerActive,
+            ]}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              if (width > 0 && height > 0) {
+                setCanvasSize({ width, height });
+              }
+            }}
             onTouchStart={handleLightboxTouchStart}
             onTouchMove={handleLightboxTouchMove}
             onTouchEnd={handleLightboxTouchEnd}
           >
             {lightboxItem && (
-              <Image
-                source={{ uri: lightboxItem.photoUri }}
+              <View
                 style={[
-                  styles.lightboxImage,
+                  styles.lightboxTransformBox,
                   {
                     transform: [
                       { translateX: panOffset.x },
@@ -602,22 +712,75 @@ export default function ReviewScreen() {
                     ],
                   },
                 ]}
-                resizeMode="contain"
-              />
+              >
+                <Image
+                  source={{ uri: lightboxItem.photoUri }}
+                  style={styles.lightboxImage}
+                  resizeMode="cover"
+                />
+                {activeLightboxMarkers.map((m, mIdx) => (
+                  <View
+                    key={`lb-marker-${mIdx}`}
+                    pointerEvents="none"
+                    style={[
+                      styles.lightboxMarkerRing,
+                      {
+                        left: `${m.xPct}%`,
+                        top: `${m.yPct}%`,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.lightboxMarkerNumber}>{mIdx + 1}</Text>
+                  </View>
+                ))}
+              </View>
             )}
           </View>
 
           <View style={styles.zoomControlsRow}>
-            <Text style={styles.zoomStatusText}>
-              Pinch or tap to zoom ({zoomScale.toFixed(1)}x)
-            </Text>
+            <View style={styles.markerButtonsGroup}>
+              <TouchableOpacity
+                style={[
+                  styles.markerModeBtn,
+                  isMarkerMode && styles.markerModeBtnActive,
+                ]}
+                onPress={toggleMarkerMode}
+              >
+                <Text style={styles.markerModeBtnText}>
+                  {isMarkerMode
+                    ? `✓ Done (${activeLightboxMarkers.length})`
+                    : '🎯 + Mark Spot'}
+                </Text>
+              </TouchableOpacity>
+
+              {lightboxItem && activeLightboxMarkers.length > 0 && (
+                <>
+                  <TouchableOpacity
+                    style={styles.undoMarkerBtn}
+                    onPress={() => undoDefectMarker(lightboxItem.id)}
+                  >
+                    <Text style={styles.undoMarkerText}>↩ Undo</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.clearMarkerBtn}
+                    onPress={() => clearDefectMarkers(lightboxItem.id)}
+                  >
+                    <Text style={styles.clearMarkerText}>Clear</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
             <View style={styles.zoomButtonsGroup}>
               {[1, 2, 3].map((preset) => (
                 <TouchableOpacity
                   key={preset}
                   style={[
                     styles.zoomPresetBtn,
-                    Math.round(zoomScale) === preset && styles.zoomPresetBtnActive,
+                    Math.round(zoomScale) === preset &&
+                      !isMarkerMode &&
+                      styles.zoomPresetBtnActive,
                   ]}
                   onPress={() => setPresetZoom(preset)}
                 >
@@ -691,6 +854,18 @@ const styles = StyleSheet.create({
   },
   summaryText: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
   signOffStatsText: { color: '#38BDF8', fontSize: 12, fontWeight: '800' },
+  batchSyncBtn: {
+    backgroundColor: '#D97706',
+    paddingVertical: 11,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  batchSyncBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   pdfActionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -757,7 +932,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#132235',
   },
   cardTopRow: { flexDirection: 'row', marginBottom: 10 },
-  defectImage: { width: 84, height: 84, borderRadius: 10, marginRight: 12 },
+  thumbWrapper: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    marginRight: 12,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  defectImage: { width: 84, height: 84, borderRadius: 10 },
+  thumbMarkerRing: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    marginLeft: -8,
+    marginTop: -8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#EF4444',
+    backgroundColor: '#EF444444',
+  },
   zoomHintBadge: {
     position: 'absolute',
     bottom: 4,
@@ -897,31 +1091,98 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#090D16',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  lightboxCanvasMarkerActive: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
+  },
+  lightboxTransformBox: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
   },
   lightboxImage: {
     width: '100%',
     height: '100%',
+  },
+  lightboxMarkerRing: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    marginLeft: -18,
+    marginTop: -18,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#EF4444',
+    backgroundColor: '#EF444466',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxMarkerNumber: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
   },
   zoomControlsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 10,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
-  zoomStatusText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '600',
+  markerButtonsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  markerModeBtn: {
+    backgroundColor: '#1E293B',
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  markerModeBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  markerModeBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  undoMarkerBtn: {
+    backgroundColor: '#334155',
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+  },
+  undoMarkerText: {
+    color: '#E2E8F0',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  clearMarkerBtn: {
+    backgroundColor: '#334155',
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+  },
+  clearMarkerText: {
+    color: '#F87171',
+    fontSize: 11,
+    fontWeight: '800',
   },
   zoomButtonsGroup: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   zoomPresetBtn: {
     backgroundColor: '#1E293B',
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#334155',
@@ -932,7 +1193,7 @@ const styles = StyleSheet.create({
   },
   zoomPresetText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   lightboxFooter: {

@@ -5,6 +5,11 @@ import { ParsedPunchItem } from '../services/gemini';
 const STORAGE_KEY = 'WALKPUNCH_INSPECTION_STORE_V2';
 const LEGACY_STORAGE_KEY = 'WALKPUNCH_ACTIVE_INSPECTION_V1';
 
+export interface DefectMarker {
+  xPct: number;
+  yPct: number;
+}
+
 export interface CapturedDefect {
   id: string;
   photoUri: string;
@@ -16,6 +21,8 @@ export interface CapturedDefect {
   expanded?: boolean;
   resolved?: boolean;
   resolvedAt?: string;
+  marker?: DefectMarker | null;
+  markers?: DefectMarker[];
 }
 
 export interface InspectionProject {
@@ -57,6 +64,17 @@ function formatDateStamp(): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+export function getDefectMarkers(item?: CapturedDefect | null): DefectMarker[] {
+  if (!item) return [];
+  if (Array.isArray(item.markers) && item.markers.length > 0) {
+    return item.markers;
+  }
+  if (item.marker) {
+    return [item.marker];
+  }
+  return [];
 }
 
 async function persistState() {
@@ -152,6 +170,53 @@ export const inspectionStore = {
       ...state,
       defects: state.defects.map((item) =>
         item.id === id ? { ...item, ...updates } : item
+      ),
+    };
+    emitChange();
+    persistState();
+  },
+
+  addDefectMarker: (id: string, newMarker: DefectMarker) => {
+    state = {
+      ...state,
+      defects: state.defects.map((item) => {
+        if (item.id !== id) return item;
+        const current = getDefectMarkers(item);
+        const updated = [...current, newMarker];
+        return {
+          ...item,
+          markers: updated,
+          marker: updated[0] || null,
+        };
+      }),
+    };
+    emitChange();
+    persistState();
+  },
+
+  undoDefectMarker: (id: string) => {
+    state = {
+      ...state,
+      defects: state.defects.map((item) => {
+        if (item.id !== id) return item;
+        const current = getDefectMarkers(item);
+        const updated = current.slice(0, -1);
+        return {
+          ...item,
+          markers: updated,
+          marker: updated[0] || null,
+        };
+      }),
+    };
+    emitChange();
+    persistState();
+  },
+
+  clearDefectMarkers: (id: string) => {
+    state = {
+      ...state,
+      defects: state.defects.map((item) =>
+        item.id === id ? { ...item, markers: [], marker: null } : item
       ),
     };
     emitChange();
@@ -300,6 +365,9 @@ export function useInspectionStore() {
     setInspectorName: inspectionStore.setInspectorName,
     addDefect: inspectionStore.addDefect,
     updateDefect: inspectionStore.updateDefect,
+    addDefectMarker: inspectionStore.addDefectMarker,
+    undoDefectMarker: inspectionStore.undoDefectMarker,
+    clearDefectMarkers: inspectionStore.clearDefectMarkers,
     toggleDefectResolved: inspectionStore.toggleDefectResolved,
     updateDefectAiData: inspectionStore.updateDefectAiData,
     deleteDefect: inspectionStore.deleteDefect,
