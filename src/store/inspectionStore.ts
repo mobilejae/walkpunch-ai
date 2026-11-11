@@ -282,7 +282,7 @@ export const inspectionStore = {
     state = {
       ...state,
       activeProjectId: Date.now().toString(),
-      propertyName: newPropertyName.trim() || 'New Property Inspection',
+      propertyName: newPropertyName.trim() || 'New Jobsite Punch Walk',
       defects: [],
       savedProjects: updatedArchives,
     };
@@ -335,7 +335,7 @@ export const inspectionStore = {
     state = {
       ...state,
       activeProjectId: Date.now().toString(),
-      propertyName: 'New Property Inspection',
+      propertyName: 'New Jobsite Punch Walk',
       defects: [],
     };
     emitChange();

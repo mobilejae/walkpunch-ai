@@ -21,7 +21,7 @@ function sanitizeFileName(name: string): string {
     .trim()
     .replace(/[\\/:*?"<>|]+/g, '')
     .replace(/\s+/g, '_');
-  return cleaned || 'Inspection_Report';
+  return cleaned || 'Punch_List_Report';
 }
 
 function escapeCsvCell(val?: string | number | null): string {
@@ -73,7 +73,8 @@ function getSeverityColor(severity?: string): string {
 async function buildReportHtml(
   propertyName: string,
   inspectorName: string,
-  defects: CapturedDefect[]
+  defects: CapturedDefect[],
+  scopeFilterLabel?: string
 ): Promise<string> {
   const reportDate = new Date().toLocaleDateString('en-US', {
     year: 'numeric',
@@ -85,6 +86,11 @@ async function buildReportHtml(
   const resolvedCount = defects.filter((d) => d.resolved).length;
   const criticalCount = defects.filter((d) => d.aiData?.severity === 'Critical').length;
   const highCount = defects.filter((d) => d.aiData?.severity === 'High').length;
+
+  const subtitleText =
+    scopeFilterLabel && scopeFilterLabel !== 'All'
+      ? `Punch-Out Scope Filter: ${scopeFilterLabel}`
+      : 'Construction Punch-Out & Substantial Completion Report';
 
   const cardsHtmlPromises = defects.map(async (item, index) => {
     let imgDataUri = '';
@@ -104,12 +110,13 @@ async function buildReportHtml(
     const severity = item.aiData?.severity || 'Medium';
     const badgeColor = getSeverityColor(severity);
     const location = escapeHtml(item.aiData?.location || 'UNASSIGNED AREA');
+    const trade = escapeHtml(item.aiData?.trade || 'General Punch');
     const title = escapeHtml(item.aiData?.defectTitle || 'Logged Punch Item');
     const description = escapeHtml(
       item.aiData?.description || 'No description provided.'
     );
     const action = escapeHtml(
-      item.aiData?.recommendedAction || 'Review and repair as needed.'
+      item.aiData?.recommendedAction || 'Complete corrective repair and verify.'
     );
     const itemNum = defects.length - index;
     const isResolved = Boolean(item.resolved);
@@ -138,11 +145,12 @@ async function buildReportHtml(
             <div>
               <span class="item-number">#${itemNum}</span>
               <span class="location-tag">${location}</span>
+              <span class="trade-tag">${trade}</span>
               <span class="timestamp">${escapeHtml(item.timestamp)}</span>
             </div>
             <div class="badge-group">
               <span class="status-badge ${isResolved ? 'status-resolved' : 'status-open'}">
-                ${isResolved ? '✓ RESOLVED' : 'OPEN'}
+                ${isResolved ? '✓ SIGNED OFF' : 'OPEN PUNCH'}
               </span>
               <span class="severity-badge" style="background-color: ${badgeColor};">
                 ${severity.toUpperCase()}
@@ -152,10 +160,10 @@ async function buildReportHtml(
           <div class="defect-title">${title}</div>
           <div class="defect-desc">${description}</div>
           <div class="action-box">
-            <strong>Recommended Action:</strong> ${action}
+            <strong>Corrective Scope (${trade}):</strong> ${action}
             ${
               isResolved && item.resolvedAt
-                ? `<div class="resolved-note">Signed off &amp; verified on ${escapeHtml(item.resolvedAt)}</div>`
+                ? `<div class="resolved-note">Verified &amp; signed off on ${escapeHtml(item.resolvedAt)}</div>`
                 : ''
             }
           </div>
@@ -321,17 +329,28 @@ async function buildReportHtml(
             font-weight: 900;
             color: #0284C7;
             font-size: 13px;
-            margin-right: 8px;
+            margin-right: 6px;
           }
           .location-tag {
             background-color: #E0F2FE;
             color: #0369A1;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 800;
-            padding: 3px 8px;
+            padding: 3px 7px;
             border-radius: 4px;
             text-transform: uppercase;
-            margin-right: 8px;
+            margin-right: 6px;
+          }
+          .trade-tag {
+            background-color: #F1F5F9;
+            color: #334155;
+            border: 1px solid #CBD5E1;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            margin-right: 6px;
           }
           .timestamp {
             color: #94A3B8;
@@ -436,29 +455,29 @@ async function buildReportHtml(
       <body>
         <div class="header">
           <div>
-            <div class="brand-badge">WalkPunch AI • Field Inspection Report</div>
+            <div class="brand-badge">WalkPunch AI • Construction &amp; Inspection Punch List</div>
             <div class="report-title">${escapeHtml(propertyName)}</div>
-            <div class="property-subtitle">Executive Punch List &amp; Trade Sign-Off Summary</div>
+            <div class="property-subtitle">${escapeHtml(subtitleText)}</div>
           </div>
           <div class="meta-right">
-            <div><strong>Inspector:</strong> ${escapeHtml(inspectorName)}</div>
+            <div><strong>Inspector / Superintendent:</strong> ${escapeHtml(inspectorName)}</div>
             <div><strong>Date:</strong> ${reportDate}</div>
-            <div><strong>Total Items:</strong> ${defects.length}</div>
+            <div><strong>Punch Items:</strong> ${defects.length}</div>
           </div>
         </div>
 
         <div class="summary-bar">
           <div class="stat-box">
             <div class="stat-count" style="color: #0F172A;">${defects.length}</div>
-            <div class="stat-label">Total Logged</div>
+            <div class="stat-label">Total Items</div>
           </div>
           <div class="stat-box">
             <div class="stat-count" style="color: #D97706;">${openCount}</div>
-            <div class="stat-label">Open Items</div>
+            <div class="stat-label">Open Punch</div>
           </div>
           <div class="stat-box">
             <div class="stat-count" style="color: #16A34A;">${resolvedCount}</div>
-            <div class="stat-label">Resolved</div>
+            <div class="stat-label">Signed Off</div>
           </div>
           <div class="stat-box">
             <div class="stat-count" style="color: #DC2626;">${criticalCount}</div>
@@ -473,49 +492,45 @@ async function buildReportHtml(
         ${cardsHtml}
 
         <div class="signoff-section">
-          <div class="signoff-title">Walkthrough Verification &amp; Sign-Off Acknowledgment</div>
+          <div class="signoff-title">Substantial Completion &amp; Trade Sign-Off Verification</div>
           <div class="signoff-grid">
             <div class="signoff-col">
               <div class="signoff-line"></div>
-              <div class="signoff-caption">Inspector Signature (${escapeHtml(inspectorName)}) &amp; Date</div>
+              <div class="signoff-caption">Superintendent / Inspector (${escapeHtml(inspectorName)}) &amp; Date</div>
             </div>
             <div class="signoff-col">
               <div class="signoff-line"></div>
-              <div class="signoff-caption">Client / General Contractor Representative &amp; Date</div>
+              <div class="signoff-caption">Owner / Subcontractor Representative &amp; Date</div>
             </div>
           </div>
         </div>
 
         <div class="footer">
-          Generated by WalkPunch AI • Multimodal Property Inspection System • ${reportDate}
+          Generated by WalkPunch AI • Construction Punch-Out &amp; Field Inspection System • ${reportDate}
         </div>
       </body>
     </html>
   `;
 }
 
-export async function previewPdfReport(
-  propertyName: string,
-  inspectorName: string,
-  defects: CapturedDefect[]
-): Promise<void> {
-  const html = await buildReportHtml(propertyName, inspectorName, defects);
-  await Print.printAsync({ html });
-}
-
 export async function savePdfToDevice(
   propertyName: string,
   inspectorName: string,
-  defects: CapturedDefect[]
+  defects: CapturedDefect[],
+  scopeFilterLabel?: string
 ): Promise<string | null> {
-  const html = await buildReportHtml(propertyName, inspectorName, defects);
+  const html = await buildReportHtml(propertyName, inspectorName, defects, scopeFilterLabel);
   const { base64 } = await Print.printToFileAsync({ html, base64: true });
 
   if (!base64) {
     throw new Error('Could not encode PDF data.');
   }
 
-  const fileName = `${sanitizeFileName(propertyName)}.pdf`;
+  const suffix =
+    scopeFilterLabel && scopeFilterLabel !== 'All'
+      ? `_${sanitizeFileName(scopeFilterLabel)}`
+      : '';
+  const fileName = `${sanitizeFileName(propertyName)}${suffix}.pdf`;
 
   if (Platform.OS === 'android') {
     const SAF = LegacyFileSystem.StorageAccessFramework;
@@ -534,10 +549,9 @@ export async function savePdfToDevice(
       encoding: LegacyFileSystem.EncodingType.Base64,
     });
 
-    console.log('[WalkPunch PDF] Saved directly to device folder:', fileUri);
     return fileName;
   } else {
-    await sharePdfReport(propertyName, inspectorName, defects);
+    await sharePdfReport(propertyName, inspectorName, defects, scopeFilterLabel);
     return fileName;
   }
 }
@@ -545,15 +559,21 @@ export async function savePdfToDevice(
 export async function sharePdfReport(
   propertyName: string,
   inspectorName: string,
-  defects: CapturedDefect[]
+  defects: CapturedDefect[],
+  scopeFilterLabel?: string
 ): Promise<void> {
-  const html = await buildReportHtml(propertyName, inspectorName, defects);
+  const html = await buildReportHtml(propertyName, inspectorName, defects, scopeFilterLabel);
   const { uri, base64 } = await Print.printToFileAsync({ html, base64: true });
+
+  const suffix =
+    scopeFilterLabel && scopeFilterLabel !== 'All'
+      ? `_${sanitizeFileName(scopeFilterLabel)}`
+      : '';
+  const fileName = `${sanitizeFileName(propertyName)}${suffix}.pdf`;
 
   let shareUri = uri;
   if (base64) {
     try {
-      const fileName = `${sanitizeFileName(propertyName)}.pdf`;
       const namedFile = new File(Paths.cache, fileName);
 
       if (namedFile.exists) {
@@ -573,34 +593,40 @@ export async function sharePdfReport(
   if (canShare) {
     await Sharing.shareAsync(shareUri, {
       mimeType: 'application/pdf',
-      dialogTitle: `${propertyName} - Inspection Report`,
+      dialogTitle: `${propertyName} - Punch List PDF`,
       UTI: 'com.adobe.pdf',
     });
   }
 }
 
-function generateCsvString(propertyName: string, inspectorName: string, defects: CapturedDefect[]): string {
+function generateCsvString(
+  propertyName: string,
+  inspectorName: string,
+  defects: CapturedDefect[]
+): string {
   const headers = [
     'Item #',
-    'Property',
-    'Inspector',
+    'Jobsite / Property',
+    'Inspector / GC',
     'Status',
     'Severity',
-    'Location',
+    'Location / Room',
+    'Assigned Trade',
     'Defect Title',
-    'Description',
-    'Recommended Trade Action',
-    'Callout Markers',
+    'Field Observation',
+    'Corrective Scope of Work',
+    'Photo Callout Markers',
     'Logged Time',
     'Signed Off Date',
   ];
 
   const rows = defects.map((item, idx) => {
     const itemNum = defects.length - idx;
-    const status = item.resolved ? 'RESOLVED' : 'OPEN';
+    const status = item.resolved ? 'SIGNED OFF' : 'OPEN';
     const severity = item.aiData?.severity || 'Medium';
     const location = item.aiData?.location || 'UNASSIGNED';
-    const title = item.aiData?.defectTitle || 'Logged Defect';
+    const trade = item.aiData?.trade || 'General Punch';
+    const title = item.aiData?.defectTitle || 'Logged Item';
     const desc = item.aiData?.description || '';
     const action = item.aiData?.recommendedAction || '';
     const markerCount = getDefectMarkers(item).length;
@@ -612,6 +638,7 @@ function generateCsvString(propertyName: string, inspectorName: string, defects:
       status,
       severity,
       location,
+      trade,
       title,
       desc,
       action,
@@ -629,10 +656,15 @@ function generateCsvString(propertyName: string, inspectorName: string, defects:
 export async function saveCsvToDevice(
   propertyName: string,
   inspectorName: string,
-  defects: CapturedDefect[]
+  defects: CapturedDefect[],
+  scopeFilterLabel?: string
 ): Promise<string | null> {
   const csvString = generateCsvString(propertyName, inspectorName, defects);
-  const fileName = `${sanitizeFileName(propertyName)}_Punch_List.csv`;
+  const suffix =
+    scopeFilterLabel && scopeFilterLabel !== 'All'
+      ? `_${sanitizeFileName(scopeFilterLabel)}`
+      : '';
+  const fileName = `${sanitizeFileName(propertyName)}${suffix}_Punch_List.csv`;
 
   if (Platform.OS === 'android') {
     const SAF = LegacyFileSystem.StorageAccessFramework;
@@ -651,10 +683,8 @@ export async function saveCsvToDevice(
       encoding: LegacyFileSystem.EncodingType.UTF8,
     });
 
-    console.log('[WalkPunch CSV] Saved directly to device folder:', fileUri);
     return fileName;
   } else {
-    // Fallback for iOS / web
     const fileUri = `${LegacyFileSystem.cacheDirectory}${fileName}`;
     await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
       encoding: LegacyFileSystem.EncodingType.UTF8,
@@ -663,7 +693,7 @@ export async function saveCsvToDevice(
     if (canShare) {
       await Sharing.shareAsync(fileUri, {
         mimeType: 'text/csv',
-        dialogTitle: `${propertyName} - Trade Punch List CSV`,
+        dialogTitle: `${propertyName} - Punch List CSV`,
         UTI: 'public.comma-separated-values-text',
       });
     }
@@ -674,10 +704,15 @@ export async function saveCsvToDevice(
 export async function shareCsvReport(
   propertyName: string,
   inspectorName: string,
-  defects: CapturedDefect[]
+  defects: CapturedDefect[],
+  scopeFilterLabel?: string
 ): Promise<void> {
   const csvString = generateCsvString(propertyName, inspectorName, defects);
-  const fileName = `${sanitizeFileName(propertyName)}_Punch_List.csv`;
+  const suffix =
+    scopeFilterLabel && scopeFilterLabel !== 'All'
+      ? `_${sanitizeFileName(scopeFilterLabel)}`
+      : '';
+  const fileName = `${sanitizeFileName(propertyName)}${suffix}_Punch_List.csv`;
   const fileUri = `${LegacyFileSystem.cacheDirectory}${fileName}`;
 
   await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
@@ -688,7 +723,7 @@ export async function shareCsvReport(
   if (canShare) {
     await Sharing.shareAsync(fileUri, {
       mimeType: 'text/csv',
-      dialogTitle: `${propertyName} - Trade Punch List CSV`,
+      dialogTitle: `${propertyName} - Punch List CSV`,
       UTI: 'public.comma-separated-values-text',
     });
   }

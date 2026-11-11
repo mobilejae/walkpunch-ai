@@ -208,7 +208,7 @@ export default function WalkthroughScreen() {
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionTitle}>Camera Access Required</Text>
         <Text style={styles.permissionSubtitle}>
-          WalkPunch AI needs camera access to photograph property defects during your walkthrough.
+          WalkPunch AI needs camera access to photograph jobsite punch items during your walkthrough.
         </Text>
         <TouchableOpacity
           style={styles.permissionButton}
@@ -238,7 +238,7 @@ export default function WalkthroughScreen() {
             </Text>
           </View>
         ) : (
-          <Text style={styles.topBarTitle}>Walkthrough Capture</Text>
+          <Text style={styles.topBarTitle}>Punch Walk Capture</Text>
         )}
 
         <TouchableOpacity
@@ -325,7 +325,7 @@ export default function WalkthroughScreen() {
           <View style={styles.recordingBanner}>
             <View style={styles.recordingDot} />
             <Text style={styles.recordingBannerText}>
-              Recording Voice Note... Speak defect location &amp; issue
+              Recording Voice... Speak room, defect &amp; trade
             </Text>
           </View>
         )}
@@ -335,7 +335,7 @@ export default function WalkthroughScreen() {
         {!isRecordingVoice ? (
           <>
             <Text style={styles.instructionText}>
-              Pinch to zoom, then tap below to snap photo &amp; start voice note
+              Pinch to zoom, then tap below to snap photo &amp; speak punch item
             </Text>
             <TouchableOpacity
               style={[
@@ -355,7 +355,7 @@ export default function WalkthroughScreen() {
         ) : (
           <>
             <Text style={styles.instructionText}>
-              Describe the room, defect, and trade repair needed:
+              State room, workmanship issue, and assigned trade or sub:
             </Text>
             <View style={styles.recordingActionsRow}>
               <TouchableOpacity
@@ -441,7 +441,7 @@ const styles = StyleSheet.create({
   },
   topBarTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   aiStatusPill: {

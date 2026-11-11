@@ -3,140 +3,145 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 export interface ParsedPunchItem {
   location: string;
+  trade: string;
   defectTitle: string;
-  description: string;
   severity: 'Low' | 'Medium' | 'High' | 'Critical';
+  description: string;
   recommendedAction: string;
 }
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-
-// Fast multi-model failover chain from your enabled account models
-const MODEL_CASCADE = [
+const GEMINI_MODELS = [
   'gemini-3.5-flash-lite',
-  'gemini-3.7-flash',
-  'gemini-3.8-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
 ];
+
+async function prepareCompressedPhotoBase64(photoUri: string): Promise<string> {
+  const manipulated = await manipulateAsync(
+    photoUri,
+    [{ resize: { width: 768 } }],
+    { compress: 0.65, format: SaveFormat.JPEG, base64: true }
+  );
+  if (!manipulated.base64) {
+    throw new Error('Failed to encode compressed photo to Base64.');
+  }
+  return manipulated.base64;
+}
+
+async function readAudioAsBase64(audioUri: string): Promise<string> {
+  const file = new File(audioUri);
+  return await file.base64();
+}
 
 export async function analyzeDefectWithAI(
   photoUri: string,
   audioUri: string
 ): Promise<ParsedPunchItem> {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'PASTE_YOUR_KEY_HERE') {
-    throw new Error('Missing EXPO_PUBLIC_GEMINI_API_KEY in .env file.');
+  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing EXPO_PUBLIC_GEMINI_API_KEY.');
   }
 
-  const startTime = Date.now();
-  console.log('--- [WalkPunch AI] Starting Defect Analysis ---');
+  const [photoBase64, audioBase64] = await Promise.all([
+    prepareCompressedPhotoBase64(photoUri),
+    readAudioAsBase64(audioUri),
+  ]);
 
-  const manipulatedImage = await manipulateAsync(
-    photoUri,
-    [{ resize: { width: 768 } }],
-    { compress: 0.5, format: SaveFormat.JPEG, base64: true }
-  );
-
-  const photoBase64 = manipulatedImage.base64 || (await new File(photoUri).base64());
-  const audioBase64 = await new File(audioUri).base64();
-
-  console.log(
-    `[WalkPunch AI] Payload encoded in ${Date.now() - startTime}ms | Photo: ${Math.round(
-      photoBase64.length / 1024
-    )}KB | Audio: ${Math.round(audioBase64.length / 1024)}KB`
-  );
-
-  const systemPrompt = `You are an expert property inspector and general contractor assistant.
-Analyze both the attached defect photo and the inspector's spoken voice note.
-Return ONLY a valid JSON object matching this exact schema:
+  const systemPrompt = `
+You are an expert Construction Superintendent, Remodeler, and Building Inspector conducting a punch-out walk.
+Analyze the attached jobsite photo and the inspector's voice recording.
+Use clear construction, remodeling, and building code terminology (e.g., trim-out, drywall flashing, reveal, caulk joint, GFI/GFCI, plumb/level, finish coat, hardware alignment).
+If the speaker names a specific subcontractor or trade, assign it to "trade". Otherwise assign the standard construction trade (e.g., Drywall & Paint, Finish Carpentry, Electrical, Plumbing, HVAC, Tile & Flooring, Cabinets & Millwork, Glazing & Windows, Exterior / Roofing, General Punch).
+Return ONLY a valid JSON object with the following exact keys:
 {
-  "location": "Room or area name mentioned or visible (e.g., Kitchen, Master Bath, Exterior)",
-  "defectTitle": "Short, professional 3-6 word title of the defect",
-  "description": "Clear, client-ready 1-2 sentence description of the issue observed",
-  "severity": "Low" | "Medium" | "High" | "Critical",
-  "recommendedAction": "Specific trade and recommended repair action (e.g., Plumber: Replace P-trap gasket and test for leaks)"
-}`;
+  "location": "Room or building elevation in UPPERCASE (e.g., KITCHEN, MASTER BATH, GARAGE, NORTH EXTERIOR)",
+  "trade": "Assigned trade category or named subcontractor (e.g., Drywall & Paint, Electrical, Plumbing, Finish Carpentry)",
+  "defectTitle": "Concise 3 to 6 word construction punch title",
+  "severity": "One of: Low, Medium, High, Critical",
+  "description": "Clear, professional 1 to 2 sentence field observation of the workmanship defect, damage, or code issue.",
+  "recommendedAction": "Specific corrective scope of work required for punch-out sign-off."
+}
+`.trim();
 
-  const requestBody = JSON.stringify({
-    contents: [
-      {
-        parts: [
-          { text: systemPrompt },
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: photoBase64,
-            },
-          },
-          {
-            inlineData: {
-              mimeType: 'audio/mp4',
-              data: audioBase64,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-    },
-  });
-
-  for (const modelName of MODEL_CASCADE) {
-    const modelStart = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-
+  for (const modelName of GEMINI_MODELS) {
     try {
-      console.log(`[WalkPunch AI] Sending request to ${modelName}...`);
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 14000);
+
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: requestBody,
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: systemPrompt },
+                {
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: photoBase64,
+                  },
+                },
+                {
+                  inlineData: {
+                    mimeType: 'audio/mp4',
+                    data: audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json',
+          },
+        }),
       });
 
       clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const data = await response.json();
-        const parts = data?.candidates?.[0]?.content?.parts || [];
-        const textPart = parts.find((p: any) => !p.thought && p.text) || parts[0];
-        const rawText = textPart?.text;
-
-        if (!rawText) {
-          console.warn(`[WalkPunch AI] Empty text from ${modelName}, trying next model...`);
-          continue;
-        }
-
-        const cleanedJson = rawText.replace(/```json|```/g, '').trim();
-        console.log(
-          `[WalkPunch AI] Success with ${modelName} in ${((Date.now() - modelStart) / 1000).toFixed(1)}s`
-        );
-
-        return JSON.parse(cleanedJson) as ParsedPunchItem;
+      if (!response.ok) {
+        console.warn(`[WalkPunch AI] ${modelName} returned status ${response.status}`);
+        continue;
       }
 
-      const errorText = await response.text();
-      console.warn(
-        `[WalkPunch AI] ${modelName} returned ${response.status}: ${errorText.slice(0, 120)}`
-      );
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      console.warn(
-        `[WalkPunch AI] ${modelName} timed out or failed after ${((Date.now() - modelStart) / 1000).toFixed(1)}s`
-      );
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) continue;
+
+      const cleanedJson = rawText
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+      const parsed = JSON.parse(cleanedJson);
+
+      return {
+        location: parsed.location || 'GENERAL / UNASSIGNED',
+        trade: parsed.trade || 'General Punch',
+        defectTitle: parsed.defectTitle || 'Logged Punch Item',
+        severity: ['Low', 'Medium', 'High', 'Critical'].includes(parsed.severity)
+          ? parsed.severity
+          : 'Medium',
+        description: parsed.description || 'Deficiency logged during jobsite walk.',
+        recommendedAction:
+          parsed.recommendedAction || 'Complete corrective repair and verify on re-walk.',
+      };
+    } catch (err) {
+      console.warn(`[WalkPunch AI] Model ${modelName} failed, trying next...`, err);
     }
   }
 
-  // Fallback card only if all 3 models are unreachable
   return {
     location: 'GENERAL / UNASSIGNED',
+    trade: 'General Punch',
     defectTitle: 'Logged Defect (Tap Edit or Retry AI)',
+    severity: 'Medium',
     description:
       'Photo and voice note saved locally. Tap Edit to enter details manually or tap Retry AI.',
-    severity: 'Medium',
-    recommendedAction: 'Inspector: Replay voice note or tap Retry AI.',
+    recommendedAction: 'Replay voice note or tap Retry AI.',
   };
 }

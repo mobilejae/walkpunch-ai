@@ -30,13 +30,15 @@ export default function HomeScreen() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newAddressInput, setNewAddressInput] = useState('');
 
+  const openCount = defects.filter((d) => !d.resolved).length;
+  const resolvedCount = defects.filter((d) => d.resolved).length;
   const criticalCount = defects.filter((d) => d.aiData?.severity === 'Critical').length;
   const highCount = defects.filter((d) => d.aiData?.severity === 'High').length;
   const mediumCount = defects.filter((d) => d.aiData?.severity === 'Medium').length;
   const lowCount = defects.filter((d) => d.aiData?.severity === 'Low').length;
 
   function handleStartNewProperty() {
-    const address = newAddressInput.trim() || 'New Property Inspection';
+    const address = newAddressInput.trim() || 'New Jobsite Punch Walk';
     archiveAndStartNew(address);
     setNewAddressInput('');
     setShowNewModal(false);
@@ -44,7 +46,7 @@ export default function HomeScreen() {
 
   function confirmDeleteArchive(id: string, name: string) {
     Alert.alert(
-      'Delete Saved Inspection?',
+      'Delete Saved Jobsite?',
       `Permanently remove "${name}" from your device archive?`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -59,8 +61,8 @@ export default function HomeScreen() {
 
   function confirmDiscardCurrent() {
     Alert.alert(
-      'Discard Current Items?',
-      'This will clear the current active inspection without archiving it.',
+      'Discard Active Punch List?',
+      'This will clear the current active walk without archiving it.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Discard', style: 'destructive', onPress: () => clearAll() },
@@ -72,7 +74,7 @@ export default function HomeScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#38BDF8" />
-        <Text style={styles.loadingText}>Loading inspection workspace...</Text>
+        <Text style={styles.loadingText}>Loading jobsite punch workspace...</Text>
       </View>
     );
   }
@@ -81,29 +83,31 @@ export default function HomeScreen() {
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>MULTI-PROJECT ARCHIVE ACTIVE</Text>
+          <Text style={styles.badgeText}>CONSTRUCTION • REMODELING • INSPECTION</Text>
         </View>
 
         <Text style={styles.title}>WalkPunch AI</Text>
         <Text style={styles.subtitle}>
-          Capture photos and voice notes on site. Switch between properties or export client-ready PDF reports anytime.
+          Point camera, speak room &amp; trade scope, and generate contractor-ready punch reports in seconds.
         </Text>
 
         <View style={styles.statusCard}>
           <View style={styles.statusHeaderRow}>
-            <Text style={styles.statusLabel}>ACTIVE INSPECTION</Text>
+            <Text style={styles.statusLabel}>ACTIVE JOBSITE PUNCH WALK</Text>
             <TouchableOpacity
               style={styles.newPropertyChip}
               onPress={() => setShowNewModal(true)}
             >
-              <Text style={styles.newPropertyChipText}>+ New Property</Text>
+              <Text style={styles.newPropertyChipText}>+ New Jobsite</Text>
             </TouchableOpacity>
           </View>
 
           <Text style={styles.propertyTitle}>{propertyName}</Text>
-          <Text style={styles.inspectorText}>Inspector: {inspectorName}</Text>
+          <Text style={styles.inspectorText}>
+            Superintendent / Inspector: {inspectorName}
+          </Text>
           <Text style={styles.countText}>
-            {defects.length} {defects.length === 1 ? 'Defect' : 'Defects'} Logged
+            {defects.length} {defects.length === 1 ? 'Item' : 'Items'} Logged ({openCount} Open • {resolvedCount} Signed Off)
           </Text>
 
           {defects.length > 0 && (
@@ -137,7 +141,7 @@ export default function HomeScreen() {
           onPress={() => router.push('/walkthrough')}
         >
           <Text style={styles.primaryButtonText}>
-            {defects.length > 0 ? '📷 Resume Camera Walk' : '📷 Start Camera Walk'}
+            {defects.length > 0 ? '📷 Resume Punch Walk' : '📷 Start Punch Walk'}
           </Text>
         </TouchableOpacity>
 
@@ -146,7 +150,7 @@ export default function HomeScreen() {
           onPress={() => router.push('/review')}
         >
           <Text style={styles.secondaryButtonText}>
-            📋 Review, Edit & Export PDF ({defects.length})
+            📋 Review, Trade Filter &amp; Export ({defects.length})
           </Text>
         </TouchableOpacity>
 
@@ -164,7 +168,7 @@ export default function HomeScreen() {
         {savedProjects.length > 0 && (
           <View style={styles.archiveSection}>
             <Text style={styles.archiveSectionTitle}>
-              SAVED INSPECTIONS ARCHIVE ({savedProjects.length})
+              SAVED JOBSITE ARCHIVE ({savedProjects.length})
             </Text>
 
             {savedProjects.map((project) => (
@@ -175,7 +179,7 @@ export default function HomeScreen() {
                   </Text>
                   <Text style={styles.archiveMetaText}>
                     {project.defects.length}{' '}
-                    {project.defects.length === 1 ? 'Defect' : 'Defects'} • Saved{' '}
+                    {project.defects.length === 1 ? 'Item' : 'Items'} • Saved{' '}
                     {project.updatedAt}
                   </Text>
                 </View>
@@ -211,18 +215,18 @@ export default function HomeScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Start New Property Walk</Text>
+            <Text style={styles.modalTitle}>Start New Jobsite Walk</Text>
             <Text style={styles.modalSubtitle}>
               {defects.length > 0
-                ? `"${propertyName}" (${defects.length} items) will be automatically archived so you can reopen it anytime.`
-                : 'Enter the property address or unit name for this inspection.'}
+                ? `"${propertyName}" (${defects.length} items) will be automatically saved to your archive.`
+                : 'Enter the jobsite address, project name, or unit number.'}
             </Text>
 
             <TextInput
               style={styles.modalInput}
               value={newAddressInput}
               onChangeText={setNewAddressInput}
-              placeholder="e.g., 2450 Oak Creek Dr"
+              placeholder="e.g., 1111 Ace Lane - Pre-Closing Walk"
               placeholderTextColor="#64748B"
               autoFocus
             />
@@ -269,7 +273,7 @@ const styles = StyleSheet.create({
   },
   container: {
     padding: 24,
-    paddingTop: 64,
+    paddingTop: 60,
     paddingBottom: 48,
   },
   badge: {
@@ -290,9 +294,9 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#FFFFFF',
-    fontSize: 34,
+    fontSize: 32,
     fontWeight: '900',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   subtitle: {
     color: '#94A3B8',
@@ -344,7 +348,7 @@ const styles = StyleSheet.create({
   },
   countText: {
     color: '#94A3B8',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   pillsRow: {

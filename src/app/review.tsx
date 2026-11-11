@@ -27,16 +27,7 @@ import {
 } from '../store/inspectionStore';
 
 const SEVERITIES: Array<ParsedPunchItem['severity']> = ['Low', 'Medium', 'High', 'Critical'];
-type FilterOption = 'All' | 'Open' | 'Resolved' | ParsedPunchItem['severity'];
-const FILTER_OPTIONS: FilterOption[] = [
-  'All',
-  'Open',
-  'Resolved',
-  'Critical',
-  'High',
-  'Medium',
-  'Low',
-];
+const BASE_FILTERS = ['All', 'Open', 'Resolved', 'Critical', 'High', 'Medium', 'Low'];
 
 function isPendingAiSync(item: CapturedDefect): boolean {
   if (item.status === 'error') return true;
@@ -63,7 +54,7 @@ export default function ReviewScreen() {
   } = useInspectionStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedFilter, setSelectedFilter] = useState<FilterOption>('All');
+  const [selectedFilter, setSelectedFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isBatchSyncing, setIsBatchSyncing] = useState(false);
@@ -87,6 +78,16 @@ export default function ReviewScreen() {
   const resolvedCount = defects.filter((d) => d.resolved).length;
   const pendingAiItems = defects.filter(isPendingAiSync);
 
+  // Dynamically extract unique trades logged on this jobsite
+  const loggedTrades = Array.from(
+    new Set(
+      defects
+        .map((d) => d.aiData?.trade?.trim())
+        .filter((t): t is string => Boolean(t))
+    )
+  );
+  const filterOptions = [...BASE_FILTERS, ...loggedTrades];
+
   const filteredDefects = defects.filter((item) => {
     if (selectedFilter === 'Open' && item.resolved) return false;
     if (selectedFilter === 'Resolved' && !item.resolved) return false;
@@ -96,18 +97,38 @@ export default function ReviewScreen() {
     ) {
       return false;
     }
+    if (
+      !BASE_FILTERS.includes(selectedFilter) &&
+      item.aiData?.trade?.trim() !== selectedFilter
+    ) {
+      return false;
+    }
 
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.toLowerCase();
       const loc = item.aiData?.location?.toLowerCase() || '';
+      const trade = item.aiData?.trade?.toLowerCase() || '';
       const title = item.aiData?.defectTitle?.toLowerCase() || '';
       const desc = item.aiData?.description?.toLowerCase() || '';
       const act = item.aiData?.recommendedAction?.toLowerCase() || '';
-      return loc.includes(q) || title.includes(q) || desc.includes(q) || act.includes(q);
+      return (
+        loc.includes(q) ||
+        trade.includes(q) ||
+        title.includes(q) ||
+        desc.includes(q) ||
+        act.includes(q)
+      );
     }
 
     return true;
   });
+
+  const activeScopeLabel =
+    searchQuery.trim().length > 0
+      ? searchQuery.trim()
+      : selectedFilter !== 'All'
+      ? selectedFilter
+      : undefined;
 
   function openLightbox(item: CapturedDefect) {
     setZoomScale(1);
@@ -220,17 +241,22 @@ export default function ReviewScreen() {
   }
 
   async function handleSavePdf() {
-    if (defects.length === 0) {
-      Alert.alert('No Punch Items', 'Log at least one defect before saving a PDF report.');
+    if (filteredDefects.length === 0) {
+      Alert.alert('No Punch Items', 'No items match the current view to export.');
       return;
     }
     try {
       setIsExportingPdf(true);
-      const savedFileName = await savePdfToDevice(propertyName, inspectorName, defects);
+      const savedFileName = await savePdfToDevice(
+        propertyName,
+        inspectorName,
+        filteredDefects,
+        activeScopeLabel
+      );
       if (savedFileName) {
         Alert.alert(
           'PDF Saved to Phone',
-          `${savedFileName} was saved to your selected device folder.`
+          `${savedFileName} (${filteredDefects.length} items) saved to your device folder.`
         );
       }
     } catch (error: any) {
@@ -241,13 +267,18 @@ export default function ReviewScreen() {
   }
 
   async function handleSharePdf() {
-    if (defects.length === 0) {
-      Alert.alert('No Punch Items', 'Log at least one defect before sharing a PDF report.');
+    if (filteredDefects.length === 0) {
+      Alert.alert('No Punch Items', 'No items match the current view to share.');
       return;
     }
     try {
       setIsExportingPdf(true);
-      await sharePdfReport(propertyName, inspectorName, defects);
+      await sharePdfReport(
+        propertyName,
+        inspectorName,
+        filteredDefects,
+        activeScopeLabel
+      );
     } catch (error: any) {
       Alert.alert('PDF Share Error', error?.message || 'Could not share PDF file.');
     } finally {
@@ -256,17 +287,22 @@ export default function ReviewScreen() {
   }
 
   async function handleSaveCsv() {
-    if (defects.length === 0) {
-      Alert.alert('No Punch Items', 'Log at least one defect before saving a CSV file.');
+    if (filteredDefects.length === 0) {
+      Alert.alert('No Punch Items', 'No items match the current view to export.');
       return;
     }
     try {
       setIsExportingPdf(true);
-      const savedFileName = await saveCsvToDevice(propertyName, inspectorName, defects);
+      const savedFileName = await saveCsvToDevice(
+        propertyName,
+        inspectorName,
+        filteredDefects,
+        activeScopeLabel
+      );
       if (savedFileName) {
         Alert.alert(
           'CSV Saved to Phone',
-          `${savedFileName} was saved to your selected device folder.`
+          `${savedFileName} (${filteredDefects.length} items) saved to your device folder.`
         );
       }
     } catch (error: any) {
@@ -277,13 +313,18 @@ export default function ReviewScreen() {
   }
 
   async function handleShareCsv() {
-    if (defects.length === 0) {
-      Alert.alert('No Punch Items', 'Log at least one defect before sharing a CSV file.');
+    if (filteredDefects.length === 0) {
+      Alert.alert('No Punch Items', 'No items match the current view to share.');
       return;
     }
     try {
       setIsExportingPdf(true);
-      await shareCsvReport(propertyName, inspectorName, defects);
+      await shareCsvReport(
+        propertyName,
+        inspectorName,
+        filteredDefects,
+        activeScopeLabel
+      );
     } catch (error: any) {
       Alert.alert('CSV Share Error', error?.message || 'Could not share CSV file.');
     } finally {
@@ -332,7 +373,7 @@ export default function ReviewScreen() {
   }
 
   function confirmDelete(id: string) {
-    Alert.alert('Delete Punch Item', 'Remove this defect from the inspection report?', [
+    Alert.alert('Delete Punch Item', 'Remove this item from the jobsite punch list?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => deleteDefect(id) },
     ]);
@@ -357,7 +398,7 @@ export default function ReviewScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Inspection Punch List</Text>
+        <Text style={styles.headerTitle}>Jobsite Punch List</Text>
         <TouchableOpacity onPress={() => router.push('/walkthrough')} style={styles.addBtn}>
           <Text style={styles.addBtnText}>+ Camera</Text>
         </TouchableOpacity>
@@ -365,30 +406,31 @@ export default function ReviewScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.propertyCard}>
-          <Text style={styles.label}>PROPERTY / PROJECT NAME</Text>
+          <Text style={styles.label}>JOBSITE / PROJECT / UNIT</Text>
           <TextInput
             style={styles.propertyInput}
             value={propertyName}
             onChangeText={setPropertyName}
-            placeholder="Enter property or unit name..."
+            placeholder="e.g., 110 Oak St - Pre-Closing Walk"
             placeholderTextColor="#64748B"
           />
 
-          <Text style={styles.label}>INSPECTOR / PREPARED BY</Text>
+          <Text style={styles.label}>SUPERINTENDENT / INSPECTOR</Text>
           <TextInput
             style={styles.propertyInput}
             value={inspectorName}
             onChangeText={setInspectorName}
-            placeholder="Enter inspector name..."
+            placeholder="Enter superintendent or inspector name..."
             placeholderTextColor="#64748B"
           />
 
           <View style={styles.statsRow}>
             <Text style={styles.summaryText}>
-              Showing {filteredDefects.length} of {defects.length} Items
+              Exporting {filteredDefects.length} of {defects.length} Items
+              {activeScopeLabel ? ` (${activeScopeLabel})` : ''}
             </Text>
             <Text style={styles.signOffStatsText}>
-              {openCount} Open • {resolvedCount} Resolved
+              {openCount} Open • {resolvedCount} Signed Off
             </Text>
           </View>
 
@@ -420,7 +462,9 @@ export default function ReviewScreen() {
                   {isExportingPdf ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.pdfBtnText}>💾 Save PDF</Text>
+                    <Text numberOfLines={1} style={styles.pdfBtnText}>
+                      💾 Save PDF
+                    </Text>
                   )}
                 </TouchableOpacity>
 
@@ -429,7 +473,9 @@ export default function ReviewScreen() {
                   onPress={handleSharePdf}
                   disabled={isExportingPdf}
                 >
-                  <Text style={styles.pdfBtnText}>📤 Share PDF</Text>
+                  <Text numberOfLines={1} style={styles.pdfBtnText}>
+                    📤 Share PDF
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -439,7 +485,9 @@ export default function ReviewScreen() {
                   onPress={handleSaveCsv}
                   disabled={isExportingPdf}
                 >
-                  <Text style={styles.pdfBtnText}>💾 Save CSV</Text>
+                  <Text numberOfLines={1} style={styles.pdfBtnText}>
+                    💾 Save CSV
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -447,7 +495,9 @@ export default function ReviewScreen() {
                   onPress={handleShareCsv}
                   disabled={isExportingPdf}
                 >
-                  <Text style={styles.pdfBtnText}>📤 Share CSV</Text>
+                  <Text numberOfLines={1} style={styles.pdfBtnText}>
+                    📤 Share CSV
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -460,7 +510,7 @@ export default function ReviewScreen() {
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="🔍 Search by room, trade, or keyword (e.g., Kitchen, Drywall)..."
+              placeholder="🔍 Filter by room, trade, or sub (e.g., Drywall, Kitchen, Plumbing)..."
               placeholderTextColor="#64748B"
             />
 
@@ -469,7 +519,7 @@ export default function ReviewScreen() {
               showsHorizontalScrollIndicator={false}
               style={styles.filterBar}
             >
-              {FILTER_OPTIONS.map((filter) => {
+              {filterOptions.map((filter) => {
                 const active = selectedFilter === filter;
                 return (
                   <TouchableOpacity
@@ -509,7 +559,7 @@ export default function ReviewScreen() {
                 style={styles.primaryBtn}
                 onPress={() => router.push('/walkthrough')}
               >
-                <Text style={styles.primaryBtnText}>+ Capture First Defect</Text>
+                <Text style={styles.primaryBtnText}>+ Capture First Punch Item</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -518,6 +568,7 @@ export default function ReviewScreen() {
             const isEditing = editingId === item.id;
             const isResolved = Boolean(item.resolved);
             const itemMarkers = getDefectMarkers(item);
+            const tradeName = item.aiData?.trade || 'General Punch';
 
             return (
               <View
@@ -569,7 +620,7 @@ export default function ReviewScreen() {
                       )}
                       {isResolved && (
                         <View style={styles.resolvedBadge}>
-                          <Text style={styles.resolvedBadgeText}>✓ RESOLVED</Text>
+                          <Text style={styles.resolvedBadgeText}>✓ SIGNED OFF</Text>
                         </View>
                       )}
                     </View>
@@ -584,7 +635,10 @@ export default function ReviewScreen() {
 
                     {item.aiData && !isEditing && (
                       <>
-                        <Text style={styles.locationText}>{item.aiData.location}</Text>
+                        <View style={styles.locTradeRow}>
+                          <Text style={styles.locationText}>{item.aiData.location}</Text>
+                          <Text style={styles.tradeBadgeText}>• {tradeName}</Text>
+                        </View>
                         <Text
                           style={[
                             styles.titleText,
@@ -601,10 +655,12 @@ export default function ReviewScreen() {
                 {item.aiData && !isEditing && (
                   <View style={styles.detailsBox}>
                     <Text style={styles.descText}>{item.aiData.description}</Text>
-                    <Text style={styles.actionText}>🛠 {item.aiData.recommendedAction}</Text>
+                    <Text style={styles.actionText}>
+                      🛠 {tradeName}: {item.aiData.recommendedAction}
+                    </Text>
                     {isResolved && item.resolvedAt && (
                       <Text style={styles.resolvedTimestampText}>
-                        ✓ Signed off on {item.resolvedAt}
+                        ✓ Verified &amp; signed off on {item.resolvedAt}
                       </Text>
                     )}
                   </View>
@@ -619,7 +675,16 @@ export default function ReviewScreen() {
                       onChangeText={(val) => updateDefectAiData(item.id, { location: val })}
                     />
 
-                    <Text style={styles.editLabel}>Defect Title</Text>
+                    <Text style={styles.editLabel}>Assigned Trade / Subcontractor</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={item.aiData.trade || ''}
+                      placeholder="e.g., Drywall & Paint, Plumbing, Electrical"
+                      placeholderTextColor="#64748B"
+                      onChangeText={(val) => updateDefectAiData(item.id, { trade: val })}
+                    />
+
+                    <Text style={styles.editLabel}>Punch Item Title</Text>
                     <TextInput
                       style={styles.editInput}
                       value={item.aiData.defectTitle}
@@ -645,7 +710,7 @@ export default function ReviewScreen() {
                       ))}
                     </View>
 
-                    <Text style={styles.editLabel}>Description</Text>
+                    <Text style={styles.editLabel}>Field Observation</Text>
                     <TextInput
                       style={[styles.editInput, styles.multilineInput]}
                       multiline
@@ -653,7 +718,7 @@ export default function ReviewScreen() {
                       onChangeText={(val) => updateDefectAiData(item.id, { description: val })}
                     />
 
-                    <Text style={styles.editLabel}>Recommended Action</Text>
+                    <Text style={styles.editLabel}>Corrective Scope of Work</Text>
                     <TextInput
                       style={styles.editInput}
                       value={item.aiData.recommendedAction}
@@ -678,7 +743,7 @@ export default function ReviewScreen() {
                         isResolved && styles.resolveBtnTextActive,
                       ]}
                     >
-                      {isResolved ? '✓ Resolved' : '○ Sign Off'}
+                      {isResolved ? '✓ Signed Off' : '○ Sign Off'}
                     </Text>
                   </TouchableOpacity>
 
@@ -732,10 +797,11 @@ export default function ReviewScreen() {
           <View style={styles.lightboxHeader}>
             <View style={{ flex: 1 }}>
               <Text style={styles.lightboxLocation}>
-                {lightboxItem?.aiData?.location || 'INSPECTION PHOTO'}
+                {lightboxItem?.aiData?.location || 'JOBSITE PHOTO'} •{' '}
+                {lightboxItem?.aiData?.trade || 'General Punch'}
               </Text>
               <Text style={styles.lightboxTitle}>
-                {lightboxItem?.aiData?.defectTitle || 'Captured Defect'}
+                {lightboxItem?.aiData?.defectTitle || 'Captured Punch Item'}
               </Text>
             </View>
             <TouchableOpacity
@@ -857,7 +923,8 @@ export default function ReviewScreen() {
                 {lightboxItem.aiData.description}
               </Text>
               <Text style={styles.lightboxAction}>
-                🛠 {lightboxItem.aiData.recommendedAction}
+                🛠 {lightboxItem.aiData.trade || 'Trade Scope'}:{' '}
+                {lightboxItem.aiData.recommendedAction}
               </Text>
             </View>
           )}
@@ -938,32 +1005,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#16A34A',
     paddingVertical: 12,
+    paddingHorizontal: 8,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   pdfShareBtn: {
     flex: 1,
     backgroundColor: '#2563EB',
     paddingVertical: 12,
+    paddingHorizontal: 8,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   csvSaveBtn: {
     flex: 1,
     backgroundColor: '#059669',
     paddingVertical: 12,
+    paddingHorizontal: 8,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   csvShareBtn: {
     flex: 1,
     backgroundColor: '#0284C7',
     paddingVertical: 12,
+    paddingHorizontal: 8,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   disabledBtn: { opacity: 0.6 },
-  pdfBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  pdfBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   searchInput: {
     backgroundColor: '#1E293B',
     color: '#FFFFFF',
@@ -1052,7 +1127,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   resolvedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  locTradeRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   locationText: { color: '#38BDF8', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  tradeBadgeText: { color: '#FBBF24', fontSize: 11, fontWeight: '800' },
   titleText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginTop: 2 },
   titleTextResolved: { color: '#86EFAC', textDecorationLine: 'line-through' },
   analyzingText: { color: '#38BDF8', fontSize: 13, fontWeight: '600' },
