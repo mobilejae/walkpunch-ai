@@ -1,6 +1,7 @@
 import {
   AudioModule,
   RecordingPresets,
+  setAudioModeAsync,
   useAudioRecorder,
 } from 'expo-audio';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -52,6 +53,12 @@ export default function WalkthroughScreen() {
     (async () => {
       const audioStatus = await AudioModule.requestRecordingPermissionsAsync();
       setHasAudioPermission(audioStatus.granted);
+      if (audioStatus.granted) {
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+        });
+      }
     })();
   }, []);
 
@@ -121,6 +128,13 @@ export default function WalkthroughScreen() {
 
       setIsTorchOn(false);
       setCapturedPhotoUri(photo.uri);
+
+      // Required on iOS before starting the native audio recorder
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
       setIsRecordingVoice(true);

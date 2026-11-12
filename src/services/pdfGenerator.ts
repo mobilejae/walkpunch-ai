@@ -551,8 +551,9 @@ export async function savePdfToDevice(
 
     return fileName;
   } else {
+    // On iOS, open the native Share / Save to Files sheet and return null
     await sharePdfReport(propertyName, inspectorName, defects, scopeFilterLabel);
-    return fileName;
+    return null;
   }
 }
 
@@ -685,19 +686,9 @@ export async function saveCsvToDevice(
 
     return fileName;
   } else {
-    const fileUri = `${LegacyFileSystem.cacheDirectory}${fileName}`;
-    await LegacyFileSystem.writeAsStringAsync(fileUri, csvString, {
-      encoding: LegacyFileSystem.EncodingType.UTF8,
-    });
-    const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      await Sharing.shareAsync(fileUri, {
-        mimeType: 'text/csv',
-        dialogTitle: `${propertyName} - Punch List CSV`,
-        UTI: 'public.comma-separated-values-text',
-      });
-    }
-    return fileName;
+    // On iOS, open the native Share / Save to Files sheet and return null
+    await shareCsvReport(propertyName, inspectorName, defects, scopeFilterLabel);
+    return null;
   }
 }
 

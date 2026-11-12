@@ -1,4 +1,4 @@
-import { useAudioPlayer } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
@@ -230,9 +230,13 @@ export default function ReviewScreen() {
     }
   }
 
-  function playVoiceNote(audioUri: string | null) {
+  async function playVoiceNote(audioUri: string | null) {
     if (!audioUri) return;
     try {
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      });
       audioPlayer.replace({ uri: audioUri });
       audioPlayer.play();
     } catch (error) {

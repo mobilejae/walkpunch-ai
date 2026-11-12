@@ -6,61 +6,66 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "walkpunchai",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.walkpunch.ai"
+      "supportsTablet": true,
+      "bundleIdentifier": "com.walkpunch.ai",
+      "infoPlist": {
+        "NSCameraUsageDescription": "WalkPunch AI needs camera access to photograph jobsite punch items and construction defects during walkthroughs.",
+        "NSMicrophoneUsageDescription": "WalkPunch AI needs microphone access to record your voice notes describing room locations, trade assignments, and corrective work.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.walkpunch.ai",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
+      },
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ],
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+        "RECORD_AUDIO"
+      ]
     },
     "web": {
-      "bundler": "metro"
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
       [
-        "expo-splash-screen",
+        "expo-camera",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "cameraPermission": "WalkPunch AI needs camera access to photograph jobsite punch items and construction defects.",
+          "microphonePermission": "WalkPunch AI needs microphone access to record voice notes for punch items.",
+          "recordAudioAndroid": true
         }
       ],
-      "expo-camera",
-      "expo-audio",
-      "expo-sharing"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "WalkPunch AI needs microphone access to record voice descriptions of jobsite defects."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0F172A"
+        }
+      ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
     "extra": {
-      "router": {
-        "asyncRoutes": {
-          "web": true
-        }
-      },
+      "router": {},
       "eas": {
         "projectId": "a4e39d34-2ddc-4761-a256-5a9035b82364"
       }
-    },
-    "owner": "mobilejae"
+    }
   }
 }
